@@ -9,7 +9,7 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   // /api/cron/* is called by a scheduler with a shared secret, not a browser session.
-  if (isPublic || pathname.startsWith("/api/auth") || pathname.startsWith("/api/cron")) return NextResponse.next();
+  if (isPublic || pathname.startsWith("/api/auth") || pathname.startsWith("/api/cron") || pathname === "/api/health") return NextResponse.next();
 
   if (!getSessionCookie(request)) {
     return NextResponse.redirect(new URL("/login", request.url));
