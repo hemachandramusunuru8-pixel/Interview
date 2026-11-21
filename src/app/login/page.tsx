@@ -53,9 +53,6 @@ export default function LoginPage() {
           {busy ? "Signing in..." : "Sign in"}
         </Button>
       </form>
-      <p className="mt-8 text-center text-xs text-slate-500">
-        Accounts are created by your administrator. Check your email for an invite link.
-      </p>
     </AuthLayout>
   );
 }
