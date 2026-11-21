@@ -3,13 +3,10 @@ import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { ROLE_HOME } from "@/lib/nav";
 import { isRole, type Role } from "@/lib/permissions";
 
-export const ROLE_HOME: Record<Role, string> = {
-  admin: "/admin",
-  recruiter: "/recruiter",
-  panelist: "/panelist",
-};
+export { ROLE_HOME } from "@/lib/nav";
 
 /** Validated session from the database, memoised per request. Null if signed out. */
 export const getSession = cache(async () => {

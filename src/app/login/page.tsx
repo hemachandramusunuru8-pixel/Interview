@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { AuthLayout } from "@/components/AuthLayout";
 import { Button, Field, FormMessage, inputClass } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
+import { ROLE_HOME } from "@/lib/nav";
+import { isRole } from "@/lib/permissions";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +19,7 @@ export default function LoginPage() {
     setError(null);
     setBusy(true);
     const form = new FormData(e.currentTarget);
-    const { error } = await authClient.signIn.email({
+    const { data, error } = await authClient.signIn.email({
       email: String(form.get("email")),
       password: String(form.get("password")),
     });
@@ -26,8 +28,9 @@ export default function LoginPage() {
       setError("Invalid email or password, or your account is inactive.");
       return;
     }
-    // "/" sends each role to its own area.
-    router.replace("/");
+    // Go straight to this role's dashboard; "/" (which also redirects there) is only the fallback.
+    const role = (data?.user as { role?: unknown } | undefined)?.role;
+    router.replace(isRole(role) ? ROLE_HOME[role] : "/");
     router.refresh();
   }
 

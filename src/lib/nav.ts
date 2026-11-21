@@ -3,6 +3,13 @@ import type { Role } from "@/lib/permissions";
 
 export type NavLink = { href: string; label: string; icon: IconName };
 
+/** Where each role lands after signing in. */
+export const ROLE_HOME: Record<Role, string> = {
+  admin: "/admin",
+  recruiter: "/recruiter",
+  panelist: "/panelist",
+};
+
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
   recruiter: "Recruiter",

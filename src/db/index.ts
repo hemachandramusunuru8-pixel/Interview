@@ -20,7 +20,8 @@ function createDb(): Db {
     globalForDb.pgPool ??
     new Pool({
       connectionString: url,
-      max: serverless ? 3 : 5,
+      // DB_POOL_MAX tunes this per host, e.g. 20 on a long-running server; small defaults otherwise.
+      max: Number(process.env.DB_POOL_MAX) || (serverless ? 3 : 5),
       idleTimeoutMillis: 10_000, // give connections back quickly
       connectionTimeoutMillis: 10_000, // fail fast instead of hanging a request
     });

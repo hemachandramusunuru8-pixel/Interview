@@ -52,7 +52,22 @@ export const auth = betterAuth({
     },
   },
 
-  rateLimit: { enabled: true, storage: "database" },
+  session: {
+    // Keep a signed copy of the session in a cookie for 60 seconds, so most page loads skip the
+    // database lookup. Trade-off: a deactivated user keeps access for at most 60 seconds.
+    cookieCache: { enabled: true, maxAge: 60 },
+  },
+
+  rateLimit: {
+    enabled: true,
+    storage: "database", // shared by every server instance
+    window: 10,
+    max: 100, // general auth requests per visitor per 10 seconds
+    customRules: {
+      // Sign-in: 5 attempts per visitor per 10 seconds, then it resets.
+      "/sign-in/email": { window: 10, max: 5 },
+    },
+  },
 
   plugins: [
     admin({ ac, roles, defaultRole: "recruiter", adminRoles: ["admin"] }),

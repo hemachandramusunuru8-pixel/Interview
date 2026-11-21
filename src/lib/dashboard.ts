@@ -1,9 +1,8 @@
 import "server-only";
-import { and, asc, desc, eq, gt, inArray, isNull, notExists, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { activityLog, candidates, feedback, interviews, jobs, user } from "@/db/schema";
 
-const count = sql<number>`count(*)::int`;
 
 /** Upcoming scheduled interviews, soonest first. Optionally only one panelist's. */
 export async function upcomingInterviews(limit: number, panelistId?: string) {
@@ -35,20 +34,25 @@ export async function upcomingInterviews(limit: number, panelistId?: string) {
     .limit(limit);
 }
 
+// Each dashboard's numbers come from ONE query (scalar subqueries) instead of one query per number:
+// every round trip to the database costs ~100-200 ms, so this is what makes dashboards fast.
+type Row = Record<string, number>;
+async function counts(query: ReturnType<typeof sql>): Promise<Row> {
+  const result = await db.execute<Row>(query);
+  return result.rows[0] ?? {};
+}
+
 export async function adminDashboard() {
-  const [roleCounts, [openJobs], [cands], [upcoming], [pending], recent, next] = await Promise.all([
-    db
-      .select({ role: user.role, n: count })
-      .from(user)
-      .where(eq(user.banned, false))
-      .groupBy(user.role),
-    db.select({ n: count }).from(jobs).where(eq(jobs.status, "open")),
-    db.select({ n: count }).from(candidates),
-    db
-      .select({ n: count })
-      .from(interviews)
-      .where(and(eq(interviews.status, "scheduled"), gt(interviews.endsAt, new Date()))),
-    db.select({ n: count }).from(interviews).where(eq(interviews.status, "pending")),
+  const [c, recent, next] = await Promise.all([
+    counts(sql`
+      select
+        (select count(*)::int from "user" where coalesce(banned, false) = false and role = 'admin') as admins,
+        (select count(*)::int from "user" where coalesce(banned, false) = false and role = 'recruiter') as recruiters,
+        (select count(*)::int from "user" where coalesce(banned, false) = false and role = 'panelist') as panelists,
+        (select count(*)::int from jobs where status = 'open') as open_jobs,
+        (select count(*)::int from candidates) as candidates,
+        (select count(*)::int from interviews where status = 'scheduled' and ends_at > now()) as upcoming,
+        (select count(*)::int from interviews where status = 'pending') as pending`),
     db
       .select({
         id: activityLog.id,
@@ -63,13 +67,12 @@ export async function adminDashboard() {
       .limit(8),
     upcomingInterviews(5),
   ]);
-  const roles = Object.fromEntries(roleCounts.map((r) => [r.role ?? "unknown", r.n]));
   return {
-    users: { admin: roles.admin ?? 0, recruiter: roles.recruiter ?? 0, panelist: roles.panelist ?? 0 },
-    openJobs: openJobs?.n ?? 0,
-    candidates: cands?.n ?? 0,
-    upcoming: upcoming?.n ?? 0,
-    pending: pending?.n ?? 0,
+    users: { admin: c.admins ?? 0, recruiter: c.recruiters ?? 0, panelist: c.panelists ?? 0 },
+    openJobs: c.open_jobs ?? 0,
+    candidates: c.candidates ?? 0,
+    upcoming: c.upcoming ?? 0,
+    pending: c.pending ?? 0,
     recent,
     next,
   };
@@ -98,17 +101,13 @@ async function needsDecision(limit: number) {
 }
 
 export async function recruiterDashboard() {
-  const [[openJobs], [waiting], [upcoming], decisions, next, recentCandidates] = await Promise.all([
-    db.select({ n: count }).from(jobs).where(eq(jobs.status, "open")),
-    db
-      .select({ n: count })
-      .from(candidates)
-      .innerJoin(jobs, eq(candidates.jobId, jobs.id))
-      .where(and(eq(jobs.status, "open"), inArray(candidates.stage, ["uploaded", "next_round"]))),
-    db
-      .select({ n: count })
-      .from(interviews)
-      .where(and(eq(interviews.status, "scheduled"), gt(interviews.endsAt, new Date()))),
+  const [c, decisions, next, recentCandidates] = await Promise.all([
+    counts(sql`
+      select
+        (select count(*)::int from jobs where status = 'open') as open_jobs,
+        (select count(*)::int from candidates c join jobs j on j.id = c.job_id
+           where j.status = 'open' and c.stage in ('uploaded', 'next_round')) as waiting,
+        (select count(*)::int from interviews where status = 'scheduled' and ends_at > now()) as upcoming`),
     needsDecision(6),
     upcomingInterviews(6),
     db
@@ -126,9 +125,9 @@ export async function recruiterDashboard() {
       .limit(5),
   ]);
   return {
-    openJobs: openJobs?.n ?? 0,
-    waiting: waiting?.n ?? 0,
-    upcoming: upcoming?.n ?? 0,
+    openJobs: c.open_jobs ?? 0,
+    waiting: c.waiting ?? 0,
+    upcoming: c.upcoming ?? 0,
     decisionsCount: decisions.length,
     decisions,
     next,
@@ -137,43 +136,19 @@ export async function recruiterDashboard() {
 }
 
 export async function panelistDashboard(panelistId: string) {
-  const [[requests], [feedbackDue], [openSlots], [waiting], next, requestList] = await Promise.all([
-    db
-      .select({ n: count })
-      .from(interviews)
-      .where(and(eq(interviews.panelistId, panelistId), eq(interviews.status, "pending"), gt(interviews.startsAt, new Date()))),
-    db
-      .select({ n: count })
-      .from(interviews)
-      .leftJoin(feedback, eq(feedback.interviewId, interviews.id))
-      .where(and(eq(interviews.panelistId, panelistId), eq(interviews.status, "completed"), isNull(feedback.id))),
-    db
-      .select({ n: count })
-      .from(interviews)
-      .where(
-        and(
-          eq(interviews.mode, "pipeline"),
-          eq(interviews.status, "pending"),
-          isNull(interviews.panelistId),
-          gt(interviews.startsAt, new Date()),
-        ),
-      ),
-    db
-      .select({ n: count })
-      .from(candidates)
-      .innerJoin(jobs, eq(candidates.jobId, jobs.id))
-      .where(
-        and(
-          eq(jobs.status, "open"),
-          inArray(candidates.stage, ["uploaded", "next_round"]),
-          notExists(
-            db
-              .select({ x: sql`1` })
-              .from(interviews)
-              .where(and(eq(interviews.candidateId, candidates.id), inArray(interviews.status, ["pending", "scheduled"]))),
-          ),
-        ),
-      ),
+  const [c, next, requestList] = await Promise.all([
+    counts(sql`
+      select
+        (select count(*)::int from interviews
+           where panelist_id = ${panelistId} and status = 'pending' and starts_at > now()) as requests,
+        (select count(*)::int from interviews i left join feedback f on f.interview_id = i.id
+           where i.panelist_id = ${panelistId} and i.status = 'completed' and f.id is null) as feedback_due,
+        (select count(*)::int from interviews
+           where mode = 'pipeline' and status = 'pending' and panelist_id is null and starts_at > now()) as open_slots,
+        (select count(*)::int from candidates c join jobs j on j.id = c.job_id
+           where j.status = 'open' and c.stage in ('uploaded', 'next_round')
+             and not exists (select 1 from interviews i
+                             where i.candidate_id = c.id and i.status in ('pending', 'scheduled'))) as waiting`),
     upcomingInterviews(5, panelistId),
     db
       .select({
@@ -192,9 +167,9 @@ export async function panelistDashboard(panelistId: string) {
       .limit(5),
   ]);
   return {
-    requests: requests?.n ?? 0,
-    feedbackDue: feedbackDue?.n ?? 0,
-    pipeline: (openSlots?.n ?? 0) + (waiting?.n ?? 0),
+    requests: c.requests ?? 0,
+    feedbackDue: c.feedback_due ?? 0,
+    pipeline: (c.open_slots ?? 0) + (c.waiting ?? 0),
     upcoming: next.length,
     next,
     requestList,
