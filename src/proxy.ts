@@ -8,7 +8,8 @@ const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password"];
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-  if (isPublic || pathname.startsWith("/api/auth")) return NextResponse.next();
+  // /api/cron/* is called by a scheduler with a shared secret, not a browser session.
+  if (isPublic || pathname.startsWith("/api/auth") || pathname.startsWith("/api/cron")) return NextResponse.next();
 
   if (!getSessionCookie(request)) {
     return NextResponse.redirect(new URL("/login", request.url));

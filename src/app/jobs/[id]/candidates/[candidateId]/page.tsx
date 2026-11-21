@@ -3,10 +3,13 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { candidates } from "@/db/schema";
+import { StageBadge } from "@/components/status";
+import { ButtonLink, PageHeader } from "@/components/ui";
 import { requireAnyRole } from "@/lib/dal";
-import { STAGE_LABEL } from "@/lib/validation/candidate";
 import { updateCandidateAction } from "../actions";
 import { CandidateForm } from "../CandidateForm";
+
+export const metadata = { title: "Edit candidate" };
 
 export default async function EditCandidatePage({
   params,
@@ -25,11 +28,14 @@ export default async function EditCandidatePage({
   if (!c) notFound();
 
   return (
-    <section className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">
-        {c.name} <span className="text-sm font-normal opacity-70">(Stage: {STAGE_LABEL[c.stage]})</span>
-      </h1>
+    <div className="mx-auto max-w-3xl">
+      <PageHeader
+        title={<span className="flex flex-wrap items-center gap-3">{c.name} <StageBadge stage={c.stage} /></span>}
+        description="Update contact details, background or the resume."
+        back={{ href: `/jobs/${ids.data.id}/candidates`, label: "Candidates" }}
+        actions={<ButtonLink href={`/jobs/${ids.data.id}/candidates/${c.id}/interviews`} variant="secondary">Interviews</ButtonLink>}
+      />
       <CandidateForm action={updateCandidateAction} jobId={ids.data.id} submitLabel="Save changes" candidate={c} />
-    </section>
+    </div>
   );
 }

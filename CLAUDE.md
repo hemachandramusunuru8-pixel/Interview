@@ -23,3 +23,8 @@ Next.js 16 (App Router, TypeScript, Tailwind) · Supabase Postgres · Drizzle OR
 - Every table has row-level security enabled (`drizzle/0001_enable_rls.sql`). New tables need the same.
 - `.env` is never committed. Passwords inside database URLs must be percent-encoded (`@` becomes `%40`).
 - Use the Supabase Session pooler string (IPv4) for `DATABASE_URL` and `DIRECT_URL`; the `db.<ref>.supabase.co` direct host is IPv6-only and times out from Node on this network.
+
+## Scheduled jobs
+- `src/lib/scheduled-jobs.ts` closes finished interviews (asks the panelist for feedback) and sends reminders (24 h and 1 h before). Each step claims rows with a single UPDATE, so repeated runs never double-send.
+- A scheduler must call `POST /api/cron/tick` every 5 minutes with header `Authorization: Bearer $CRON_SECRET`. Locally, run `npm run tick` against the running app.
+- Opening the panelist "My interviews" page or a candidate's interviews page also closes finished interviews, so feedback still appears if the scheduler is late. Reminders only go out when the scheduler runs.

@@ -3,9 +3,13 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { jobs } from "@/db/schema";
+import { JobStatusBadge } from "@/components/status";
+import { ButtonLink, PageHeader } from "@/components/ui";
 import { requireAnyRole } from "@/lib/dal";
 import { updateJobAction } from "../actions";
 import { JobForm } from "../JobForm";
+
+export const metadata = { title: "Edit job" };
 
 export default async function EditJobPage({ params }: { params: Promise<{ id: string }> }) {
   await requireAnyRole(["admin", "recruiter"]);
@@ -16,9 +20,14 @@ export default async function EditJobPage({ params }: { params: Promise<{ id: st
   if (!job) notFound();
 
   return (
-    <section className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">Edit job</h1>
+    <div className="mx-auto max-w-3xl">
+      <PageHeader
+        title={<span className="flex items-center gap-3">Edit job <JobStatusBadge status={job.status} /></span>}
+        description={job.title}
+        back={{ href: "/jobs", label: "Jobs" }}
+        actions={<ButtonLink href={`/jobs/${job.id}/candidates`} variant="secondary">View candidates</ButtonLink>}
+      />
       <JobForm action={updateJobAction} submitLabel="Save changes" job={job} />
-    </section>
+    </div>
   );
 }

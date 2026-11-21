@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { activityLog } from "@/db/schema";
 
 type Entry = {
-  actorId: string;
+  actorId: string | null; // null for actions taken by the system, such as scheduled jobs
   action: string; // e.g. "job.created"
   entityType: string; // e.g. "job"
   entityId: string;

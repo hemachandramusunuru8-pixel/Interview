@@ -2,11 +2,15 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { AuthLayout } from "@/components/AuthLayout";
+import { Button, Field, FormMessage, inputClass } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const router = useRouter();
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -23,27 +27,32 @@ export default function LoginPage() {
       return;
     }
     // "/" sends each role to its own area.
-    window.location.assign("/");
+    router.replace("/");
+    router.refresh();
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-6 p-6">
-      <h1 className="text-2xl font-semibold">Interview Platform</h1>
-      <form onSubmit={onSubmit} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm">
-          Email
-          <input name="email" type="email" required autoComplete="email" className="rounded border p-2" />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Password
-          <input name="password" type="password" required autoComplete="current-password" className="rounded border p-2" />
-        </label>
-        {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-        <button disabled={busy} className="rounded bg-black p-2 text-white disabled:opacity-50">
+    <AuthLayout title="Welcome back" subtitle="Sign in to manage jobs, candidates and interviews.">
+      <form onSubmit={onSubmit} className="flex flex-col gap-5">
+        <Field label="Email">
+          <input name="email" type="email" required autoComplete="email" placeholder="you@company.com" className={inputClass} />
+        </Field>
+        <Field label="Password">
+          <input name="password" type="password" required autoComplete="current-password" className={inputClass} />
+        </Field>
+        <div className="-mt-2 flex justify-end">
+          <Link href="/forgot-password" className="text-sm font-medium text-brand-600 hover:text-brand-700">
+            Forgot password?
+          </Link>
+        </div>
+        {error && <FormMessage error={error} />}
+        <Button type="submit" disabled={busy} className="w-full">
           {busy ? "Signing in..." : "Sign in"}
-        </button>
+        </Button>
       </form>
-      <Link href="/forgot-password" className="text-sm underline">Forgot your password?</Link>
-    </main>
+      <p className="mt-8 text-center text-xs text-slate-500">
+        Accounts are created by your administrator. Check your email for an invite link.
+      </p>
+    </AuthLayout>
   );
 }

@@ -4,9 +4,13 @@ import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { candidates, jobs } from "@/db/schema";
+import { FileIcon, PlusIcon, UsersIcon } from "@/components/icons";
+import { JobStatusBadge, StageBadge } from "@/components/status";
+import { Avatar, ButtonLink, Card, EmptyState, Notice, PageHeader, SkillTags, TD, TH, THead, TR, Table } from "@/components/ui";
 import { requireAnyRole } from "@/lib/dal";
-import { JOB_STATUS_LABEL } from "@/lib/validation/job";
-import { STAGE_LABEL } from "@/lib/validation/candidate";
+import { CANDIDATE_STAGES, STAGE_LABEL } from "@/lib/validation/candidate";
+
+export const metadata = { title: "Candidates" };
 
 export default async function CandidatesPage({ params }: { params: Promise<{ id: string }> }) {
   await requireAnyRole(["admin", "recruiter"]);
@@ -22,59 +26,110 @@ export default async function CandidatesPage({ params }: { params: Promise<{ id:
     .where(eq(candidates.jobId, job.id))
     .orderBy(desc(candidates.createdAt));
 
+  const stageCounts = CANDIDATE_STAGES.map((s) => ({ stage: s, n: rows.filter((r) => r.stage === s).length })).filter(
+    (s) => s.n > 0,
+  );
+
   return (
-    <section className="flex flex-col gap-4">
-      <div>
-        <Link href="/jobs" className="text-sm underline">Back to jobs</Link>
-        <div className="mt-2 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">
-            {job.title} <span className="text-sm font-normal opacity-70">({job.department} - {JOB_STATUS_LABEL[job.status]})</span>
-          </h1>
-          {job.status === "open" ? (
-            <Link href={`/jobs/${job.id}/candidates/new`} className="rounded bg-black px-4 py-2 text-sm text-white">
-              Add candidate
-            </Link>
-          ) : (
-            <span className="text-sm opacity-70">Candidates can only be added to an open job.</span>
-          )}
+    <>
+      <PageHeader
+        back={{ href: "/jobs", label: "Jobs" }}
+        title={<span className="flex flex-wrap items-center gap-3">{job.title} <JobStatusBadge status={job.status} /></span>}
+        description={`${job.department} · ${job.rounds} interview round${job.rounds === 1 ? "" : "s"} · ${rows.length} candidate${rows.length === 1 ? "" : "s"}`}
+        actions={
+          <>
+            <ButtonLink href={`/jobs/${job.id}`} variant="secondary">Edit job</ButtonLink>
+            {job.status === "open" && (
+              <ButtonLink href={`/jobs/${job.id}/candidates/new`}><PlusIcon width={16} height={16} />Add candidate</ButtonLink>
+            )}
+          </>
+        }
+      />
+
+      {job.status !== "open" && (
+        <div className="mb-4">
+          <Notice tone="amber">This job is not open, so new candidates cannot be added.</Notice>
         </div>
-      </div>
-      {rows.length === 0 ? (
-        <p className="text-sm">No candidates yet.</p>
-      ) : (
-        <table className="w-full text-left text-sm [&_td]:pr-4 [&_th]:pr-4">
-          <thead>
-            <tr className="border-b">
-              <th className="py-2">Name</th>
-              <th>Email</th>
-              <th>Experience</th>
-              <th>Company</th>
-              <th>Stage</th>
-              <th>Resume</th>
-              <th>Added</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.id} className="border-b">
-                <td className="py-2">
-                  <Link href={`/jobs/${job.id}/candidates/${c.id}`} className="underline">{c.name}</Link>
-                </td>
-                <td>{c.email}</td>
-                <td>{c.experienceYears} yrs</td>
-                <td>{c.currentCompany ?? "-"}</td>
-                <td>{STAGE_LABEL[c.stage]}</td>
-                <td>
-                  <a href={`/jobs/${job.id}/candidates/${c.id}/resume`} target="_blank" rel="noreferrer" className="underline">
-                    View
-                  </a>
-                </td>
-                <td>{c.createdAt.toLocaleDateString("en-GB")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       )}
-    </section>
+
+      {stageCounts.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          {stageCounts.map((s) => (
+            <span key={s.stage} className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-sm shadow-sm ring-1 ring-slate-200">
+              <span className="text-slate-600">{STAGE_LABEL[s.stage]}</span>
+              <span className="font-semibold text-slate-900">{s.n}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <Card>
+        {rows.length === 0 ? (
+          <EmptyState
+            icon={<UsersIcon width={22} height={22} />}
+            title="No candidates yet"
+            description="Add a candidate with their resume. Panelists are notified that they are waiting for an interview."
+            action={
+              job.status === "open" ? (
+                <ButtonLink href={`/jobs/${job.id}/candidates/new`}><PlusIcon width={16} height={16} />Add candidate</ButtonLink>
+              ) : undefined
+            }
+          />
+        ) : (
+          <Table>
+            <THead>
+              <tr>
+                <TH>Candidate</TH>
+                <TH>Experience</TH>
+                <TH>Skills</TH>
+                <TH>Stage</TH>
+                <TH>Resume</TH>
+                <TH className="text-right">Actions</TH>
+              </tr>
+            </THead>
+            <tbody>
+              {rows.map((c) => (
+                <TR key={c.id}>
+                  <TD>
+                    <div className="flex items-center gap-3">
+                      <Avatar name={c.name} size="sm" />
+                      <div className="min-w-0">
+                        <Link href={`/jobs/${job.id}/candidates/${c.id}/interviews`} className="block truncate font-medium text-slate-900 hover:text-brand-700">
+                          {c.name}
+                        </Link>
+                        <p className="truncate text-xs text-slate-500">{c.email}</p>
+                      </div>
+                    </div>
+                  </TD>
+                  <TD className="whitespace-nowrap">
+                    {c.experienceYears} yrs
+                    <p className="text-xs text-slate-500">{c.currentCompany ?? "-"}</p>
+                  </TD>
+                  <TD><SkillTags skills={c.skills} max={3} /></TD>
+                  <TD><StageBadge stage={c.stage} /></TD>
+                  <TD>
+                    <a
+                      href={`/jobs/${job.id}/candidates/${c.id}/resume`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
+                    >
+                      <FileIcon width={16} height={16} />
+                      View
+                    </a>
+                  </TD>
+                  <TD className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <ButtonLink href={`/jobs/${job.id}/candidates/${c.id}`} variant="ghost" size="sm">Edit</ButtonLink>
+                      <ButtonLink href={`/jobs/${job.id}/candidates/${c.id}/interviews`} variant="secondary" size="sm">Interviews</ButtonLink>
+                    </div>
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+    </>
   );
 }

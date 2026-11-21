@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { AuthLayout } from "@/components/AuthLayout";
+import { CheckCircleIcon } from "@/components/icons";
+import { Button, Field, FormMessage, buttonClass, inputClass } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
 
 function ResetForm() {
@@ -27,33 +30,48 @@ function ResetForm() {
     else setDone(true);
   }
 
-  if (!token) return <p className="text-sm">This link is invalid. Request a new one.</p>;
-  if (done) return <p className="text-sm">Password saved. You can now sign in.</p>;
+  if (!token) {
+    return (
+      <div className="flex flex-col gap-6">
+        <FormMessage error="This link is invalid. Request a new one." />
+        <Link href="/forgot-password" className={buttonClass("primary", "md", "w-full")}>Request a new link</Link>
+      </div>
+    );
+  }
+  if (done) {
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="flex items-start gap-3 rounded-lg bg-emerald-50 p-4 text-sm text-emerald-800 ring-1 ring-inset ring-emerald-200">
+          <CheckCircleIcon className="mt-0.5 shrink-0" />
+          <p>Your password is saved. You can now sign in.</p>
+        </div>
+        <Link href="/login" className={buttonClass("primary", "md", "w-full")}>Go to sign in</Link>
+      </div>
+    );
+  }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1 text-sm">
-        New password (at least 10 characters)
-        <input name="password" type="password" required minLength={10} autoComplete="new-password" className="rounded border p-2" />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        Confirm password
-        <input name="confirm" type="password" required minLength={10} autoComplete="new-password" className="rounded border p-2" />
-      </label>
-      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-      <button disabled={busy} className="rounded bg-black p-2 text-white disabled:opacity-50">Save password</button>
+    <form onSubmit={onSubmit} className="flex flex-col gap-5">
+      <Field label="New password" hint="At least 10 characters.">
+        <input name="password" type="password" required minLength={10} autoComplete="new-password" className={inputClass} />
+      </Field>
+      <Field label="Confirm password">
+        <input name="confirm" type="password" required minLength={10} autoComplete="new-password" className={inputClass} />
+      </Field>
+      {error && <FormMessage error={error} />}
+      <Button type="submit" disabled={busy} className="w-full">
+        {busy ? "Saving..." : "Save password"}
+      </Button>
     </form>
   );
 }
 
 export default function ResetPasswordPage() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-6 p-6">
-      <h1 className="text-2xl font-semibold">Set your password</h1>
+    <AuthLayout title="Set your password" subtitle="Choose a password to finish setting up your account.">
       <Suspense>
         <ResetForm />
       </Suspense>
-      <Link href="/login" className="text-sm underline">Go to sign in</Link>
-    </main>
+    </AuthLayout>
   );
 }

@@ -3,9 +3,12 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { jobs } from "@/db/schema";
+import { PageHeader } from "@/components/ui";
 import { requireAnyRole } from "@/lib/dal";
 import { createCandidateAction } from "../actions";
 import { CandidateForm } from "../CandidateForm";
+
+export const metadata = { title: "Add candidate" };
 
 export default async function NewCandidatePage({ params }: { params: Promise<{ id: string }> }) {
   await requireAnyRole(["admin", "recruiter"]);
@@ -17,9 +20,13 @@ export default async function NewCandidatePage({ params }: { params: Promise<{ i
   if (job.status !== "open") redirect(`/jobs/${job.id}/candidates`);
 
   return (
-    <section className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">Add candidate to {job.title}</h1>
+    <div className="mx-auto max-w-3xl">
+      <PageHeader
+        title="Add candidate"
+        description={`${job.title} · Panelists are notified that this candidate is waiting for an interview.`}
+        back={{ href: `/jobs/${job.id}/candidates`, label: job.title }}
+      />
       <CandidateForm action={createCandidateAction} jobId={job.id} submitLabel="Add candidate" />
-    </section>
+    </div>
   );
 }

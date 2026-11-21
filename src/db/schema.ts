@@ -108,3 +108,102 @@ export const candidates = pgTable(
     index("candidates_stage_idx").on(table.stage),
   ],
 );
+
+export const interviewStatus = pgEnum("interview_status", [
+  "pending", // direct request sent, waiting for the panelist
+  "scheduled", // accepted; Teams event created
+  "declined",
+  "cancelled",
+  "completed",
+]);
+
+export const interviewMode = pgEnum("interview_mode", ["direct", "pipeline"]);
+
+// Times are stored in UTC; time_zone is the zone the interview was booked in (for display and the invite).
+export const interviews = pgTable(
+  "interviews",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => candidates.id, { onDelete: "restrict" }),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "restrict" }),
+    round: integer("round").notNull(),
+    mode: interviewMode("mode").notNull().default("direct"),
+    panelistId: text("panelist_id").references(() => user.id, { onDelete: "restrict" }), // null for an unclaimed pipeline posting
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    timeZone: text("time_zone").notNull(),
+    status: interviewStatus("status").notNull().default("pending"),
+    declineReason: text("decline_reason"),
+    teamsJoinUrl: text("teams_join_url"),
+    graphEventId: text("graph_event_id"),
+    // Set once each automatic email has been sent, so a repeated job run never sends it twice.
+    reminder24SentAt: timestamp("reminder_24_sent_at", { withTimezone: true }),
+    reminder1SentAt: timestamp("reminder_1_sent_at", { withTimezone: true }),
+    feedbackRequestedAt: timestamp("feedback_requested_at", { withTimezone: true }),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    check("interviews_round_positive", sql`${table.round} >= 1`),
+    check("interviews_ends_after_start", sql`${table.endsAt} > ${table.startsAt}`),
+    // One live interview per candidate and round.
+    uniqueIndex("interviews_active_candidate_round_uniq")
+      .on(table.candidateId, table.round)
+      .where(sql`${table.status} in ('pending', 'scheduled')`),
+    index("interviews_panelist_idx").on(table.panelistId),
+    index("interviews_candidate_idx").on(table.candidateId),
+    index("interviews_status_idx").on(table.status),
+  ],
+);
+
+// In-app copies of the emails sent to Recruiters and Panelists.
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    link: text("link"),
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("notifications_user_idx").on(table.userId, table.readAt)],
+);
+
+export const feedbackRecommendation = pgEnum("feedback_recommendation", ["move_forward", "hold", "reject"]);
+
+// One feedback per interview, written by the panelist who held it.
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .unique()
+      .references(() => interviews.id, { onDelete: "restrict" }),
+    panelistId: text("panelist_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    rating: integer("rating").notNull(),
+    recommendation: feedbackRecommendation("recommendation").notNull(),
+    comments: text("comments").notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check("feedback_rating_range", sql`${table.rating} between 1 and 5`),
+    index("feedback_panelist_idx").on(table.panelistId),
+  ],
+);

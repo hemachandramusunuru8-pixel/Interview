@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { AuthLayout } from "@/components/AuthLayout";
+import { MailIcon } from "@/components/icons";
+import { Button, Field, buttonClass, inputClass } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
 
 export default function ForgotPasswordPage() {
@@ -22,22 +25,31 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-6 p-6">
-      <h1 className="text-2xl font-semibold">Reset your password</h1>
+    <AuthLayout
+      title={sent ? "Check your email" : "Reset your password"}
+      subtitle={sent ? undefined : "Enter your work email and we will send you a reset link."}
+    >
       {sent ? (
-        <p className="text-sm">If that email has an account, a reset link is on its way.</p>
+        <div className="flex flex-col gap-6">
+          <div className="flex items-start gap-3 rounded-lg bg-brand-50 p-4 text-sm text-brand-900 ring-1 ring-inset ring-brand-100">
+            <MailIcon className="mt-0.5 shrink-0 text-brand-600" />
+            <p>If that email has an account, a reset link is on its way. The link expires in 3 days.</p>
+          </div>
+          <Link href="/login" className={buttonClass("secondary", "md", "w-full")}>Back to sign in</Link>
+        </div>
       ) : (
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1 text-sm">
-            Email
-            <input name="email" type="email" required className="rounded border p-2" />
-          </label>
-          <button disabled={busy} className="rounded bg-black p-2 text-white disabled:opacity-50">
-            Send reset link
-          </button>
+        <form onSubmit={onSubmit} className="flex flex-col gap-5">
+          <Field label="Email">
+            <input name="email" type="email" required autoComplete="email" placeholder="you@company.com" className={inputClass} />
+          </Field>
+          <Button type="submit" disabled={busy} className="w-full">
+            {busy ? "Sending..." : "Send reset link"}
+          </Button>
+          <Link href="/login" className="text-center text-sm font-medium text-slate-600 hover:text-slate-900">
+            Back to sign in
+          </Link>
         </form>
       )}
-      <Link href="/login" className="text-sm underline">Back to sign in</Link>
-    </main>
+    </AuthLayout>
   );
 }

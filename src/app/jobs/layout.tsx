@@ -8,7 +8,13 @@ const TITLE = { admin: "Admin", recruiter: "Recruiter" } as const;
 export default async function JobsLayout({ children }: { children: React.ReactNode }) {
   const { user } = await requireAnyRole(["admin", "recruiter"]);
   return (
-    <AppShell title={TITLE[user.role as keyof typeof TITLE]} userName={user.name} links={navFor(user.role)}>
+    <AppShell
+      title={TITLE[user.role as keyof typeof TITLE]}
+      userName={user.name}
+      userId={user.id}
+      userEmail={user.email}
+      links={navFor(user.role)}
+    >
       {children}
     </AppShell>
   );

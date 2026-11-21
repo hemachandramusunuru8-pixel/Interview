@@ -55,3 +55,77 @@ export async function sendMail({ to, subject, html }: MailInput): Promise<void> 
     throw new Error(`Graph sendMail failed (${res.status}): ${await res.text()}`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Calendar events with a Teams link. The event is organised by the service mailbox,
+// so every attendee receives a standard Outlook invite.
+// ---------------------------------------------------------------------------
+
+export type Attendee = { name: string; email: string };
+
+export type EventInput = {
+  subject: string;
+  html: string;
+  startsAt: Date;
+  endsAt: Date;
+  attendees: Attendee[];
+};
+
+// Graph wants a wall-clock string plus a zone. Sending UTC avoids any zone ambiguity; each
+// attendee's calendar shows the meeting in their own time zone.
+function utcWallClock(d: Date) {
+  return { dateTime: d.toISOString().replace(/\.\d{3}Z$/, ""), timeZone: "UTC" };
+}
+
+export function buildEventPayload(input: EventInput) {
+  return {
+    subject: input.subject,
+    body: { contentType: "HTML", content: input.html },
+    start: utcWallClock(input.startsAt),
+    end: utcWallClock(input.endsAt),
+    attendees: input.attendees.map((a) => ({
+      emailAddress: { address: a.email, name: a.name },
+      type: "required",
+    })),
+    isOnlineMeeting: true,
+    onlineMeetingProvider: "teamsForBusiness",
+    allowNewTimeProposals: false,
+  };
+}
+
+async function graphRequest(method: string, path: string, body?: unknown) {
+  const token = await getAccessToken();
+  const mailbox = encodeURIComponent(requireEnv("GRAPH_SERVICE_MAILBOX"));
+  const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`Graph ${method} ${path.split("/")[1] ?? ""} failed (${res.status}): ${await res.text()}`);
+  }
+  return res.status === 204 || res.status === 202 ? null : res.json();
+}
+
+/** Creates the event and returns the Teams join link and the event id. */
+export async function createInterviewEvent(input: EventInput) {
+  const event = (await graphRequest("POST", "/events", buildEventPayload(input))) as {
+    id: string;
+    onlineMeeting?: { joinUrl?: string } | null;
+  };
+  if (!event.onlineMeeting?.joinUrl) throw new Error("Graph created the event without a Teams link");
+  return { eventId: event.id, joinUrl: event.onlineMeeting.joinUrl };
+}
+
+/** Moves the event; Outlook sends the attendees an updated invite. */
+export async function rescheduleInterviewEvent(eventId: string, startsAt: Date, endsAt: Date) {
+  await graphRequest("PATCH", `/events/${encodeURIComponent(eventId)}`, {
+    start: utcWallClock(startsAt),
+    end: utcWallClock(endsAt),
+  });
+}
+
+/** Cancels the event; Outlook sends the attendees a cancellation. */
+export async function cancelInterviewEvent(eventId: string, comment: string) {
+  await graphRequest("POST", `/events/${encodeURIComponent(eventId)}/cancel`, { comment });
+}

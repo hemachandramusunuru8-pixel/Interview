@@ -10,7 +10,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "tick": "node scripts/tick.mjs"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "^1.7.27",

@@ -29,6 +29,20 @@
       "when": 1795274193906,
       "tag": "0003_add_candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795274889245,
+      "tag": "0004_add_interviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795275944969,
+      "tag": "0005_add_feedback",
+      "breakpoints": true
     }
   ]
 }

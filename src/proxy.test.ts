@@ -18,7 +18,7 @@ describe("proxy (optimistic route guard)", () => {
     },
   );
 
-  it.each(["/login", "/forgot-password", "/reset-password", "/api/auth/sign-in/email"])(
+  it.each(["/login", "/forgot-password", "/reset-password", "/api/auth/sign-in/email", "/api/cron/tick"])(
     "lets %s through without a session",
     (path) => {
       const res = proxy(req(path));

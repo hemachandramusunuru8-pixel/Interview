@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { candidates, jobs } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
 import { requireAnyRole } from "@/lib/dal";
+import { announceWaitingCandidate } from "@/lib/notify";
 import { deleteResume, uploadResume } from "@/lib/storage";
 import { candidateSchema } from "@/lib/validation/candidate";
 import { checkResume } from "@/lib/validation/resume";
@@ -40,7 +41,7 @@ export async function createCandidateAction(
 
   const jobId = uuid.safeParse(formData.get("jobId"));
   if (!jobId.success) return { error: "Invalid job." };
-  const [job] = await db.select({ id: jobs.id, status: jobs.status }).from(jobs).where(eq(jobs.id, jobId.data));
+  const [job] = await db.select({ id: jobs.id, title: jobs.title, status: jobs.status }).from(jobs).where(eq(jobs.id, jobId.data));
   if (!job) return { error: "That job no longer exists." };
   if (job.status !== "open") return { error: "Candidates can only be added to an open job." };
 
@@ -78,6 +79,9 @@ export async function createCandidateAction(
     console.error(err);
     return { error: "Could not save the candidate. Try again." };
   }
+
+  // A new candidate goes straight into the pipeline: every panelist is told they are waiting.
+  await announceWaitingCandidate(parsed.data.name, job.title, 1);
 
   revalidatePath(`/jobs/${job.id}/candidates`);
   redirect(`/jobs/${job.id}/candidates`);
