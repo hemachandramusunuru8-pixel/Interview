@@ -1,3 +1,4 @@
+import { appBaseUrl } from "@/lib/base-url";
 import { escapeHtml as e } from "@/lib/html";
 import { formatInZone } from "@/lib/time";
 
@@ -12,7 +13,7 @@ export type Details = {
 };
 
 const when = (d: Details) => formatInZone(d.startsAt, d.timeZone);
-const baseUrl = () => process.env.APP_BASE_URL ?? "http://localhost:3000";
+const baseUrl = appBaseUrl;
 
 export function panelistRequestMail(panelistName: string, d: Details): Mail {
   return {

@@ -4,6 +4,7 @@ import { admin } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { appBaseUrl } from "@/lib/base-url";
 import { ac, roles } from "@/lib/permissions";
 import { sendMail } from "@/lib/graph";
 
@@ -12,8 +13,13 @@ function escapeHtml(value: string): string {
 }
 
 export const auth = betterAuth({
-  baseURL: process.env.APP_BASE_URL,
+  baseURL: appBaseUrl(),
   secret: process.env.AUTH_SECRET,
+  advanced: {
+    // Rate limiting is per visitor, so it needs the real client address. Netlify passes it in
+    // x-nf-client-connection-ip; without this every visitor would share one sign-in limit.
+    ipAddress: { ipAddressHeaders: ["x-nf-client-connection-ip", "x-forwarded-for"] },
+  },
   database: drizzleAdapter(db, { provider: "pg", schema }),
 
   emailAndPassword: {
