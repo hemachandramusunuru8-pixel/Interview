@@ -1,31 +1,34 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import * as schema from "./schema";
 
-type Db = ReturnType<typeof drizzle<typeof schema>>;
+type Db = NodePgDatabase<typeof schema>;
 
-// Reuse one connection pool across hot reloads in development.
-const globalForDb = globalThis as unknown as { pgClient?: ReturnType<typeof postgres>; db?: Db };
+// Reuse one pool across hot reloads in development.
+const globalForDb = globalThis as unknown as { pgPool?: Pool; db?: Db };
 
-// Serverless hosts start many short-lived instances, and each one opens its own pool. Keep each pool
-// small (a single connection can deadlock when a request holds it inside a transaction). Production
-// must use Supabase's transaction pooler (port 6543), which allows far more clients than the session
-// pooler (port 5432, only 15 in total).
+// Serverless hosts start many short-lived instances, each with its own pool, so keep each pool small.
+// Production must use Supabase's transaction pooler (port 6543). node-postgres sends one query per
+// connection at a time and queues the rest, which the transaction pooler requires: the previous driver
+// sent queued queries down busy connections and they hung.
 const serverless = Boolean(process.env.NETLIFY || process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
 function createDb(): Db {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
-  const client =
-    globalForDb.pgClient ??
-    postgres(url, {
+  const pool =
+    globalForDb.pgPool ??
+    new Pool({
+      connectionString: url,
       max: serverless ? 3 : 5,
-      idle_timeout: 20, // give connections back quickly
-      // Required by Supabase's transaction pooler (port 6543); harmless on the session pooler.
-      prepare: false,
+      idleTimeoutMillis: 10_000, // give connections back quickly
+      connectionTimeoutMillis: 10_000, // fail fast instead of hanging a request
     });
-  if (process.env.NODE_ENV !== "production") globalForDb.pgClient = client;
-  return drizzle(client, { schema });
+  // An idle connection that drops (network, pooler restart) emits "error" on the pool. Without a
+  // listener Node treats it as unhandled and the whole function crashes; log it and let pg reconnect.
+  if (!globalForDb.pgPool) pool.on("error", (err) => console.error("Postgres pool error:", err.message));
+  if (process.env.NODE_ENV !== "production") globalForDb.pgPool = pool;
+  return drizzle(pool, { schema });
 }
 
 /**
