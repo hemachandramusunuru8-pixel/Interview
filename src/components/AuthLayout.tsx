@@ -15,7 +15,6 @@ export function AuthLayout({ title, subtitle, children }: { title: string; subti
         <div className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-white/10 blur-2xl" />
         <div className="absolute -bottom-32 -left-20 h-96 w-96 rounded-full bg-indigo-300/20 blur-3xl" />
         <div className="relative flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 text-sm font-bold ring-1 ring-white/25">IP</span>
           <span className="text-lg font-semibold tracking-tight">Interview Platform</span>
         </div>
         <div className="relative max-w-md">
@@ -42,7 +41,6 @@ export function AuthLayout({ title, subtitle, children }: { title: string; subti
       <div className="flex items-center justify-center bg-white px-6 py-12 sm:px-12">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">IP</span>
             <span className="text-lg font-semibold tracking-tight">Interview Platform</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{title}</h1>
