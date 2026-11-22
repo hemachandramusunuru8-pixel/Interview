@@ -7,6 +7,7 @@ import { feedbackRequestMail, reminderMail, type Details } from "@/lib/emails";
 import { sendMail } from "@/lib/graph";
 import { loadInterview, type InterviewContext } from "@/lib/interviews";
 import { notifyUser } from "@/lib/notify";
+import { syncRecordings } from "@/lib/recordings";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -136,5 +137,10 @@ export async function sendDueReminders(now: Date = new Date()): Promise<number> 
 export async function runDueJobs(now: Date = new Date()) {
   const completed = await completeEndedInterviews(now);
   const reminders = await sendDueReminders(now);
-  return { completed, reminders };
+  // Teams recordings for interviews that ended recently are saved for Admins and Recruiters.
+  const recordings = await syncRecordings({ now }).catch((err) => {
+    console.error("Recording sync failed:", err);
+    return { checked: 0, saved: 0, failed: 1 };
+  });
+  return { completed, reminders, recordings };
 }
