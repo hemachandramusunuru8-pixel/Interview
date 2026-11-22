@@ -142,3 +142,61 @@ export async function rescheduleInterviewEvent(eventId: string, startsAt: Date, 
 export async function cancelInterviewEvent(eventId: string, comment: string) {
   await graphRequest("POST", `/events/${encodeURIComponent(eventId)}/cancel`, { comment });
 }
+
+// ---------------------------------------------------------------------------
+// Teams recordings. Requires OnlineMeetings.Read(Write).All and OnlineMeetingRecording.Read.All, plus a
+// Teams application access policy granted to the service mailbox user (the meeting organizer).
+// ---------------------------------------------------------------------------
+
+let serviceUserId: string | null = null;
+
+/** Object id of the service mailbox user, who organises every interview meeting. */
+async function organizerId(): Promise<string> {
+  if (serviceUserId) return serviceUserId;
+  const token = await getAccessToken();
+  const mailbox = encodeURIComponent(requireEnv("GRAPH_SERVICE_MAILBOX"));
+  const res = await fetch(`https://graph.microsoft.com/v1.0/users/${mailbox}?$select=id`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Graph user lookup failed (${res.status}): ${await res.text()}`);
+  serviceUserId = ((await res.json()) as { id: string }).id;
+  return serviceUserId;
+}
+
+async function meetingsRequest(path: string, init: RequestInit = {}) {
+  const token = await getAccessToken();
+  const user = await organizerId();
+  return fetch(`https://graph.microsoft.com/v1.0/users/${user}/onlineMeetings${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, ...(init.headers as Record<string, string> | undefined) },
+  });
+}
+
+/** The Teams meeting id behind a join link, or null if Teams has no such meeting. */
+export async function findOnlineMeetingId(joinUrl: string): Promise<string | null> {
+  const filter = encodeURIComponent(`JoinWebUrl eq '${joinUrl.replace(/'/g, "''")}'`);
+  const res = await meetingsRequest(`?$filter=${filter}`);
+  if (!res.ok) throw new Error(`Graph meeting lookup failed (${res.status}): ${await res.text()}`);
+  const body = (await res.json()) as { value?: { id: string }[] };
+  return body.value?.[0]?.id ?? null;
+}
+
+export type GraphRecording = { id: string; meetingId: string; createdDateTime?: string; endDateTime?: string };
+
+/** Recordings Teams has finished processing for a meeting (often none until a few minutes after it ends). */
+export async function listMeetingRecordings(meetingId: string): Promise<GraphRecording[]> {
+  const res = await meetingsRequest(`/${encodeURIComponent(meetingId)}/recordings`);
+  if (!res.ok) throw new Error(`Graph recordings list failed (${res.status}): ${await res.text()}`);
+  return ((await res.json()) as { value?: GraphRecording[] }).value ?? [];
+}
+
+/**
+ * The recording video. Redirects are not followed, so the caller can send the browser straight to
+ * Microsoft's own link when Graph offers one; otherwise the bytes are returned to stream through.
+ */
+export async function fetchRecordingContent(meetingId: string, recordingId: string, range?: string | null) {
+  return meetingsRequest(`/${encodeURIComponent(meetingId)}/recordings/${encodeURIComponent(recordingId)}/content`, {
+    redirect: "manual",
+    headers: range ? { Range: range } : undefined,
+  });
+}

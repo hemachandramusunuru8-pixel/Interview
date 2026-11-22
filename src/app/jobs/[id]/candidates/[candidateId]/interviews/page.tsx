@@ -9,6 +9,7 @@ import { Avatar, ButtonLink, Card, CardBody, CardHeader, EmptyState, Notice, Pag
 import { requireAnyRole } from "@/lib/dal";
 import { completedRounds } from "@/lib/interviews";
 import { allowedOutcomes } from "@/lib/outcomes";
+import { recordingsFor } from "@/lib/recordings";
 import { formatInZone } from "@/lib/time";
 import { CancelForm, OutcomeForm, RescheduleForm, SchedulePanel } from "./forms";
 
@@ -45,6 +46,11 @@ export default async function CandidateInterviewsPage({
     .innerJoin(interviews, eq(feedback.interviewId, interviews.id))
     .where(eq(interviews.candidateId, cand.id));
   const feedbackByInterview = new Map(feedbackRows.map((r) => [r.feedback.interviewId, r.feedback]));
+
+  const recordingsByInterview = new Map<string, Awaited<ReturnType<typeof recordingsFor>>>();
+  for (const r of await recordingsFor(list.map((x) => x.i.id))) {
+    recordingsByInterview.set(r.interviewId, [...(recordingsByInterview.get(r.interviewId) ?? []), r]);
+  }
 
   const live = list.find((r) => r.i.status === "pending" || r.i.status === "scheduled");
   const done = await completedRounds(cand.id);
@@ -171,6 +177,31 @@ export default async function CandidateInterviewsPage({
                       ) : i.status === "completed" ? (
                         <p className="text-sm text-slate-500">Waiting for feedback from {panelistName}.</p>
                       ) : null}
+
+                      {(recordingsByInterview.get(i.id) ?? []).length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {(recordingsByInterview.get(i.id) ?? []).map((rec, n, all) => (
+                            <a
+                              key={rec.id}
+                              href={`/jobs/${job.id}/candidates/${cand.id}/interviews/recordings/${rec.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={buttonClass("secondary", "sm")}
+                            >
+                              <VideoIcon width={16} height={16} />
+                              {all.length > 1 ? `Watch recording ${n + 1}` : "Watch recording"}
+                              {rec.startedAt && rec.endedAt
+                                ? ` (${Math.max(1, Math.round((rec.endedAt.getTime() - rec.startedAt.getTime()) / 60000))} min)`
+                                : ""}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                      {i.teamsJoinUrl && i.endsAt < new Date() && (recordingsByInterview.get(i.id) ?? []).length === 0 && (
+                        <p className="text-xs text-slate-500">
+                          No Teams recording found yet. Recordings appear here a few minutes after the meeting if someone pressed Record.
+                        </p>
+                      )}
 
                       {(isLive || (i.teamsJoinUrl && i.status === "scheduled")) && (
                         <div className="flex flex-wrap items-start gap-2">

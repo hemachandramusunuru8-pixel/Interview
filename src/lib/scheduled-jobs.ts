@@ -6,6 +6,7 @@ import { logActivity } from "@/lib/activity";
 import { feedbackRequestMail, reminderMail, type Details } from "@/lib/emails";
 import { sendMail } from "@/lib/graph";
 import { loadInterview, type InterviewContext } from "@/lib/interviews";
+import { syncRecordings } from "@/lib/recordings";
 
 const HOUR = 60 * 60 * 1000;
 const DELIVERY_LEASE_MS = 5 * 60 * 1000;
@@ -145,5 +146,9 @@ export async function runDueJobs(now: Date = new Date()) {
   const completed = await completeEndedInterviews(now);
   const reminders = await sendDueReminders(now);
   const deliveries = await processInterviewDeliveries(now);
-  return { expired, completed, reminders, deliveries };
+  const recordings = await syncRecordings({ now }).catch((err) => {
+    console.error("Recording sync failed:", err);
+    return { checked: 0, saved: 0, failed: 1 };
+  });
+  return { expired, completed, reminders, deliveries, recordings };
 }

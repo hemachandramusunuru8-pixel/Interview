@@ -150,6 +150,9 @@ export const interviews = pgTable(
     reminder24SentAt: timestamp("reminder_24_sent_at", { withTimezone: true }),
     reminder1SentAt: timestamp("reminder_1_sent_at", { withTimezone: true }),
     feedbackRequestedAt: timestamp("feedback_requested_at", { withTimezone: true }),
+    // Teams recordings: the meeting id is looked up once from the join link; checks stop after a while.
+    onlineMeetingId: text("online_meeting_id"),
+    recordingsCheckedAt: timestamp("recordings_checked_at", { withTimezone: true }),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id, { onDelete: "restrict" }),
@@ -241,4 +244,22 @@ export const feedback = pgTable(
     check("feedback_rating_range", sql`${table.rating} between 1 and 5`),
     index("feedback_panelist_idx").on(table.panelistId),
   ],
+);
+
+// Teams recordings found for an interview. The video itself stays in Microsoft 365 (OneDrive);
+// this row is what lets Admins and Recruiters find and play it later.
+export const interviewRecordings = pgTable(
+  "interview_recordings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    interviewId: uuid("interview_id")
+      .notNull()
+      .references(() => interviews.id, { onDelete: "restrict" }),
+    graphRecordingId: text("graph_recording_id").notNull().unique(),
+    meetingId: text("meeting_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("interview_recordings_interview_idx").on(table.interviewId)],
 );

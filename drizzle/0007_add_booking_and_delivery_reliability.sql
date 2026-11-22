@@ -1,3 +1,4 @@
+CREATE TYPE "public"."booking_state" AS ENUM('idle', 'creating', 'confirmed', 'failed');--> statement-breakpoint
 CREATE TYPE "public"."calendar_state" AS ENUM('idle', 'rescheduling', 'cancelling');--> statement-breakpoint
 CREATE TYPE "public"."delivery_kind" AS ENUM('reminder_24', 'reminder_1', 'feedback_request');--> statement-breakpoint
 CREATE TYPE "public"."delivery_recipient" AS ENUM('recruiter', 'panelist', 'candidate');--> statement-breakpoint
@@ -18,6 +19,11 @@ CREATE TABLE "interview_deliveries" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "interviews" ADD COLUMN "booking_state" "booking_state" DEFAULT 'idle' NOT NULL;--> statement-breakpoint
+-- Existing Graph-backed events are confirmed. Unresolved scheduled rows need an explicit retry.
+UPDATE "interviews" SET "booking_state" = 'confirmed' WHERE "graph_event_id" IS NOT NULL;--> statement-breakpoint
+UPDATE "interviews" SET "booking_state" = 'failed'
+WHERE "status" = 'scheduled' AND "graph_event_id" IS NULL;--> statement-breakpoint
 ALTER TABLE "interviews" ADD COLUMN "calendar_state" "calendar_state" DEFAULT 'idle' NOT NULL;--> statement-breakpoint
 ALTER TABLE "interviews" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "interviews" ADD COLUMN "schedule_revision" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
