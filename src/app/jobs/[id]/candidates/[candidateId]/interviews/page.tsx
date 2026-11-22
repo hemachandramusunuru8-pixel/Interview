@@ -9,7 +9,6 @@ import { Avatar, ButtonLink, Card, CardBody, CardHeader, EmptyState, Notice, Pag
 import { requireAnyRole } from "@/lib/dal";
 import { completedRounds } from "@/lib/interviews";
 import { allowedOutcomes } from "@/lib/outcomes";
-import { completeEndedInterviews } from "@/lib/scheduled-jobs";
 import { formatInZone } from "@/lib/time";
 import { CancelForm, OutcomeForm, RescheduleForm, SchedulePanel } from "./forms";
 
@@ -25,8 +24,6 @@ export default async function CandidateInterviewsPage({
     .object({ id: z.string().uuid(), candidateId: z.string().uuid() })
     .safeParse(await params);
   if (!ids.success) notFound();
-
-  await completeEndedInterviews().catch((err) => console.error("completeEndedInterviews failed:", err));
 
   const [cand] = await db
     .select()
@@ -154,6 +151,13 @@ export default async function CandidateInterviewsPage({
                         <p className="text-sm text-slate-600">
                           Declined{i.declineReason ? `: “${i.declineReason}”` : ""}. Send it to another panelist or post it to the pipeline.
                         </p>
+                      )}
+
+                      {i.status === "scheduled" && i.bookingState === "creating" && (
+                        <Notice tone="amber">The Teams invite is being created. Calendar changes are temporarily unavailable.</Notice>
+                      )}
+                      {i.status === "scheduled" && i.bookingState === "failed" && (
+                        <Notice tone="amber">The Teams invite needs recovery by the assigned panelist before this interview can continue.</Notice>
                       )}
 
                       {fb ? (

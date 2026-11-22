@@ -10,6 +10,11 @@ type Entry = {
   details?: object;
 };
 
-export async function logActivity({ actorId, action, entityType, entityId, details }: Entry) {
-  await db.insert(activityLog).values({ actorId, action, entityType, entityId, details });
+type ActivityWriter = Pick<typeof db, "insert">;
+
+export async function logActivity(
+  { actorId, action, entityType, entityId, details }: Entry,
+  writer: ActivityWriter = db,
+) {
+  await writer.insert(activityLog).values({ actorId, action, entityType, entityId, details });
 }

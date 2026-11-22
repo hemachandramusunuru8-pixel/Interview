@@ -12,6 +12,11 @@ describe("zonedToUtc", () => {
     expect(zonedToUtc("2026-07-15T09:00", "America/New_York")?.toISOString()).toBe("2026-07-15T13:00:00.000Z");
   });
 
+  it("rejects daylight-saving gaps and repeated local times", () => {
+    expect(zonedToUtc("2027-03-14T02:30", "America/New_York")).toBeNull();
+    expect(zonedToUtc("2027-11-07T01:30", "America/New_York")).toBeNull();
+  });
+
   it("returns the same time for UTC", () => {
     expect(zonedToUtc("2026-05-05T00:00", "UTC")?.toISOString()).toBe("2026-05-05T00:00:00.000Z");
   });

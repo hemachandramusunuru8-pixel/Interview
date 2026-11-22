@@ -2,7 +2,12 @@
 
 import { useActionState, useState } from "react";
 import { Button, FormMessage, inputClass } from "@/components/ui";
-import { acceptInterviewAction, declineInterviewAction, type PanelistActionState } from "./actions";
+import {
+  acceptInterviewAction,
+  declineInterviewAction,
+  retryInterviewBookingAction,
+  type PanelistActionState,
+} from "./actions";
 
 const initial: PanelistActionState = {};
 
@@ -14,6 +19,19 @@ export function AcceptForm({ interviewId }: { interviewId: string }) {
       {!state.ok && (
         <Button type="submit" disabled={pending}>{pending ? "Creating Teams invite..." : "Accept"}</Button>
       )}
+      <FormMessage error={state.error} ok={state.ok} />
+    </form>
+  );
+}
+
+export function RetryBookingForm({ interviewId }: { interviewId: string }) {
+  const [state, action, pending] = useActionState(retryInterviewBookingAction, initial);
+  return (
+    <form action={action} className="flex flex-col gap-2">
+      <input type="hidden" name="interviewId" value={interviewId} />
+      <Button type="submit" disabled={pending} variant="secondary">
+        {pending ? "Retrying Teams invite..." : "Retry Teams invite"}
+      </Button>
       <FormMessage error={state.error} ok={state.ok} />
     </form>
   );

@@ -43,6 +43,20 @@
       "when": 1795275944969,
       "tag": "0005_add_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795334162235,
+      "tag": "0006_add_booking_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795353789927,
+      "tag": "0007_add_delivery_queue_and_concurrency",
+      "breakpoints": true
     }
   ]
 }

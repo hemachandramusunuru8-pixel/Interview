@@ -3,6 +3,7 @@ import { buildEventPayload } from "./graph";
 
 describe("buildEventPayload", () => {
   const payload = buildEventPayload({
+    transactionId: "interview-1",
     subject: "Interview",
     html: "<p>x</p>",
     startsAt: new Date("2030-06-01T04:30:00.000Z"),
@@ -17,6 +18,10 @@ describe("buildEventPayload", () => {
   it("asks for a Teams meeting", () => {
     expect(payload.isOnlineMeeting).toBe(true);
     expect(payload.onlineMeetingProvider).toBe("teamsForBusiness");
+  });
+
+  it("uses the stable booking id to deduplicate retries", () => {
+    expect(payload.transactionId).toBe("interview-1");
   });
 
   it("sends times as UTC wall-clock without milliseconds", () => {

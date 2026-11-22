@@ -18,12 +18,17 @@ vi.mock("@/lib/graph", () => ({
   createInterviewEvent: vi.fn(),
   rescheduleInterviewEvent: vi.fn(),
   cancelInterviewEvent: vi.fn(),
+  getInterviewEvent: vi.fn(),
   sendMail: vi.fn(),
 }));
 vi.mock("@/lib/notify", () => ({ notifyUser: vi.fn() }));
 vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
 
-import { acceptInterviewAction, declineInterviewAction } from "@/app/panelist/interviews/actions";
+import {
+  acceptInterviewAction,
+  declineInterviewAction,
+  retryInterviewBookingAction,
+} from "@/app/panelist/interviews/actions";
 import {
   cancelInterviewAction,
   rescheduleInterviewAction,
@@ -43,6 +48,7 @@ describe("panelist actions", () => {
   it.each([
     ["accept", acceptInterviewAction],
     ["decline", declineInterviewAction],
+    ["retry booking", retryInterviewBookingAction],
   ])("%s requires the panelist role and does nothing else when denied", async (_n, action) => {
     requireRoleMock.mockRejectedValue(denied);
     await expect(action({}, fd())).rejects.toBe(denied);

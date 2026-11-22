@@ -1,12 +1,12 @@
 "use server";
 
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, exists, gt, lt, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
-import { interviews } from "@/db/schema";
+import { interviews, jobs } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
-import { confirmBooking } from "@/lib/booking";
+import { BOOKING_STALE_MS, confirmBooking } from "@/lib/booking";
 import { requireRole } from "@/lib/dal";
 import { recruiterDeclinedMail, type Details } from "@/lib/emails";
 import { loadInterview } from "@/lib/interviews";
@@ -27,13 +27,15 @@ export async function acceptInterviewAction(
   // A second click, or a recruiter cancelling at the same moment, cannot be accepted twice.
   const [claimed] = await db
     .update(interviews)
-    .set({ status: "scheduled" })
+    .set({ status: "scheduled", bookingState: "creating", version: sql`${interviews.version} + 1` })
     .where(
       and(
         eq(interviews.id, id.data),
         eq(interviews.panelistId, me.id),
         eq(interviews.status, "pending"),
+        eq(interviews.calendarState, "idle"),
         gt(interviews.startsAt, new Date()),
+        exists(db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.id, interviews.jobId), eq(jobs.status, "open")))),
       ),
     )
     .returning({ id: interviews.id });
@@ -41,13 +43,49 @@ export async function acceptInterviewAction(
 
   const result = await confirmBooking(id.data, me.id, "interview.accepted");
   if (!result.ok) {
-    // Nothing was sent to anyone: put the request back so it can be accepted again.
-    await db.update(interviews).set({ status: "pending" }).where(eq(interviews.id, id.data));
+    revalidatePath("/panelist/interviews");
     return { error: result.error };
   }
 
   revalidatePath("/panelist/interviews");
   return { ok: "Accepted. The Teams invite has been sent to everyone." };
+}
+
+export async function retryInterviewBookingAction(
+  _prev: PanelistActionState,
+  formData: FormData,
+): Promise<PanelistActionState> {
+  const { user: me } = await requireRole("panelist");
+  const id = z.string().uuid().safeParse(formData.get("interviewId"));
+  if (!id.success) return { error: "Invalid interview." };
+
+  const [claimed] = await db
+    .update(interviews)
+    .set({ bookingState: "creating", version: sql`${interviews.version} + 1` })
+    .where(
+      and(
+        eq(interviews.id, id.data),
+        eq(interviews.panelistId, me.id),
+        eq(interviews.status, "scheduled"),
+        eq(interviews.calendarState, "idle"),
+        or(
+          eq(interviews.bookingState, "failed"),
+          and(
+            eq(interviews.bookingState, "creating"),
+            lt(interviews.updatedAt, new Date(Date.now() - BOOKING_STALE_MS)),
+          ),
+        ),
+        gt(interviews.startsAt, new Date()),
+        exists(db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.id, interviews.jobId), eq(jobs.status, "open")))),
+      ),
+    )
+    .returning({ id: interviews.id });
+  if (!claimed) return { error: "This Teams booking is no longer available to retry." };
+
+  const result = await confirmBooking(id.data, me.id, "interview.booking_retried");
+  revalidatePath("/panelist/interviews");
+  if (!result.ok) return { error: result.error };
+  return { ok: "The Teams invite has been created and sent to everyone." };
 }
 
 export async function declineInterviewAction(

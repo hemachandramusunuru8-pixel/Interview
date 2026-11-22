@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, exists, gt, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
@@ -26,14 +26,16 @@ export async function pickSlotAction(_prev: PipelineState, formData: FormData): 
   try {
     [claimed] = await db
       .update(interviews)
-      .set({ panelistId: me.id, status: "scheduled" })
+      .set({ panelistId: me.id, status: "scheduled", bookingState: "creating", version: sql`${interviews.version} + 1` })
       .where(
         and(
           eq(interviews.id, id.data),
           eq(interviews.mode, "pipeline"),
           eq(interviews.status, "pending"),
+          eq(interviews.calendarState, "idle"),
           isNull(interviews.panelistId),
           gt(interviews.startsAt, new Date()),
+          exists(db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.id, interviews.jobId), eq(jobs.status, "open")))),
         ),
       )
       .returning({ id: interviews.id });
@@ -46,8 +48,8 @@ export async function pickSlotAction(_prev: PipelineState, formData: FormData): 
 
   const result = await confirmBooking(id.data, me.id, "interview.picked");
   if (!result.ok) {
-    // Release it back to the pipeline so another panelist (or this one) can pick it.
-    await db.update(interviews).set({ panelistId: null, status: "pending" }).where(eq(interviews.id, id.data));
+    revalidatePath("/panelist/pipeline");
+    revalidatePath("/panelist/interviews");
     return { error: result.error };
   }
   revalidatePath("/panelist/pipeline");
@@ -103,6 +105,7 @@ export async function pickCandidateAction(_prev: PipelineState, formData: FormDa
         endsAt: slot.data.endsAt,
         timeZone: slot.data.timeZone,
         status: "scheduled",
+        bookingState: "creating",
         // The recruiter who added the candidate is the one told and invited.
         createdBy: row.cand.createdBy,
       })
@@ -119,7 +122,8 @@ export async function pickCandidateAction(_prev: PipelineState, formData: FormDa
 
   const result = await confirmBooking(interviewId, me.id, "interview.picked");
   if (!result.ok) {
-    await db.update(interviews).set({ status: "cancelled" }).where(eq(interviews.id, interviewId));
+    revalidatePath("/panelist/pipeline");
+    revalidatePath("/panelist/interviews");
     return { error: result.error };
   }
   revalidatePath("/panelist/pipeline");
