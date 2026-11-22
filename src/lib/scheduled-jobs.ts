@@ -1,146 +1,154 @@
 import "server-only";
-import { and, eq, gt, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { candidates, interviews } from "@/db/schema";
+import { candidates, interviewDeliveries, interviews, notifications } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
 import { feedbackRequestMail, reminderMail, type Details } from "@/lib/emails";
 import { sendMail } from "@/lib/graph";
 import { loadInterview, type InterviewContext } from "@/lib/interviews";
-import { notifyUser } from "@/lib/notify";
 import { syncRecordings } from "@/lib/recordings";
 
 const HOUR = 60 * 60 * 1000;
+const DELIVERY_LEASE_MS = 5 * 60 * 1000;
+const MAX_DELIVERY_ATTEMPTS = 8;
 
 function details(i: InterviewContext): Details {
-  return {
-    candidateName: i.candidate.name,
-    jobTitle: i.job.title,
-    round: i.interview.round,
-    startsAt: i.interview.startsAt,
-    timeZone: i.interview.timeZone,
-  };
+  return { candidateName: i.candidate.name, jobTitle: i.job.title, round: i.interview.round, startsAt: i.interview.startsAt, timeZone: i.interview.timeZone };
 }
 
-/**
- * Interviews whose end time has passed become "completed": the candidate moves to "Interview done"
- * and the panelist is asked for feedback. Each interview is claimed in a single UPDATE, so running
- * this twice (or from two places at once) never sends a second request.
- */
 export async function completeEndedInterviews(now: Date = new Date()): Promise<number> {
-  const claimed = await db
-    .update(interviews)
-    .set({ status: "completed", feedbackRequestedAt: now })
-    .where(
-      and(eq(interviews.status, "scheduled"), lt(interviews.endsAt, now), isNull(interviews.feedbackRequestedAt)),
-    )
-    .returning({ id: interviews.id, candidateId: interviews.candidateId });
-
-  for (const { id, candidateId } of claimed) {
-    try {
-      await db
-        .update(candidates)
-        .set({ stage: "interview_done" })
-        .where(and(eq(candidates.id, candidateId), eq(candidates.stage, "interview_scheduled")));
-
-      const ctx = await loadInterview(id);
-      if (ctx?.panelist) {
-        const mail = feedbackRequestMail(ctx.panelist.name, id, details(ctx));
-        await notifyUser({
-          userId: ctx.panelist.id,
-          email: ctx.panelist.email,
-          subject: mail.subject,
-          html: mail.html,
-          title: "Please submit feedback",
-          body: `${ctx.candidate.name} - ${ctx.job.title}, round ${ctx.interview.round}`,
-          link: `/panelist/interviews/${id}/feedback`,
-        });
-      }
-      await logActivity({ actorId: null, action: "interview.completed", entityType: "interview", entityId: id });
-    } catch (err) {
-      console.error("Completing interview failed:", id, err);
-    }
-  }
-  return claimed.length;
-}
-
-async function sendReminder(interviewId: string) {
-  const ctx = await loadInterview(interviewId);
-  if (!ctx || !ctx.panelist) return;
-  const d = details(ctx);
-  const join = ctx.interview.teamsJoinUrl;
-
-  for (const person of [ctx.recruiter, ctx.panelist]) {
-    const mail = reminderMail(person.name, d, join);
-    await notifyUser({
-      userId: person.id,
-      email: person.email,
-      subject: mail.subject,
-      html: mail.html,
-      title: "Interview reminder",
-      body: `${ctx.candidate.name} - ${ctx.job.title}, round ${ctx.interview.round}`,
-      link: person.id === ctx.panelist.id ? "/panelist/interviews" : `/jobs/${ctx.job.id}/candidates/${ctx.candidate.id}/interviews`,
+  const due = await db.select({ id: interviews.id }).from(interviews).where(and(
+    eq(interviews.status, "scheduled"), eq(interviews.bookingState, "confirmed"), eq(interviews.calendarState, "idle"),
+    lt(interviews.endsAt, now), isNull(interviews.feedbackRequestedAt),
+  )).limit(100);
+  let completed = 0;
+  for (const row of due) {
+    const won = await db.transaction(async (tx) => {
+      const [claimed] = await tx.update(interviews)
+        .set({ status: "completed", feedbackRequestedAt: now, version: sql`${interviews.version} + 1` })
+        .where(and(eq(interviews.id, row.id), eq(interviews.status, "scheduled"), eq(interviews.bookingState, "confirmed"), eq(interviews.calendarState, "idle"), isNull(interviews.feedbackRequestedAt)))
+        .returning({ candidateId: interviews.candidateId, scheduleRevision: interviews.scheduleRevision });
+      if (!claimed) return false;
+      await tx.update(candidates).set({ stage: "interview_done" }).where(and(eq(candidates.id, claimed.candidateId), eq(candidates.stage, "interview_scheduled")));
+      await tx.insert(interviewDeliveries).values({ interviewId: row.id, kind: "feedback_request", recipient: "panelist", scheduleRevision: claimed.scheduleRevision }).onConflictDoNothing();
+      await logActivity({ actorId: null, action: "interview.completed", entityType: "interview", entityId: row.id }, tx);
+      return true;
     });
+    if (won) completed++;
   }
-  // The candidate never logs in, so they only get the email.
-  const candMail = reminderMail(ctx.candidate.name, d, join);
-  try {
-    await sendMail({ to: ctx.candidate.email, subject: candMail.subject, html: candMail.html });
-  } catch (err) {
-    console.error("Candidate reminder failed:", err);
-  }
+  return completed;
 }
 
-/**
- * Reminders for scheduled interviews: one within 24 hours, one within the final hour.
- * An interview booked late (inside the hour) gets a single reminder, not two.
- */
+export async function expirePastInterviews(now: Date = new Date()): Promise<number> {
+  const due = await db.select({ id: interviews.id }).from(interviews)
+    .where(and(eq(interviews.status, "pending"), eq(interviews.calendarState, "idle"), lte(interviews.startsAt, now)))
+    .limit(100);
+  if (!due.length) return 0;
+  const expired = await db.update(interviews).set({ status: "cancelled", version: sql`${interviews.version} + 1` })
+    .where(and(inArray(interviews.id, due.map((row) => row.id)), eq(interviews.status, "pending"), eq(interviews.calendarState, "idle"), lte(interviews.startsAt, now)))
+    .returning({ id: interviews.id });
+  for (const { id } of expired) {
+    try { await logActivity({ actorId: null, action: "interview.expired", entityType: "interview", entityId: id }); }
+    catch (err) { console.error("Logging expired interview failed:", id, err); }
+  }
+  return expired.length;
+}
+
+async function enqueueReminder(kind: "reminder_24" | "reminder_1", now: Date, from: Date, to: Date) {
+  return db.transaction(async (tx) => {
+    const marker = kind === "reminder_24"
+      ? { reminder24SentAt: now }
+      : { reminder1SentAt: now, reminder24SentAt: sql`coalesce(${interviews.reminder24SentAt}, ${now.toISOString()}::timestamptz)` };
+    const markerColumn = kind === "reminder_24" ? interviews.reminder24SentAt : interviews.reminder1SentAt;
+    const due = await tx.select({ id: interviews.id }).from(interviews).where(and(
+      eq(interviews.status, "scheduled"), eq(interviews.bookingState, "confirmed"), eq(interviews.calendarState, "idle"),
+      isNull(markerColumn), gt(interviews.startsAt, from), lte(interviews.startsAt, to),
+    )).limit(100);
+    if (!due.length) return 0;
+    const claimed = await tx.update(interviews).set(marker).where(and(
+      eq(interviews.status, "scheduled"), eq(interviews.bookingState, "confirmed"), eq(interviews.calendarState, "idle"),
+      inArray(interviews.id, due.map((row) => row.id)), isNull(markerColumn), gt(interviews.startsAt, from), lte(interviews.startsAt, to),
+    )).returning({ id: interviews.id, scheduleRevision: interviews.scheduleRevision });
+    if (claimed.length) {
+      await tx.insert(interviewDeliveries).values(claimed.flatMap((item) => (["recruiter", "panelist", "candidate"] as const).map((recipient) => ({
+        interviewId: item.id, kind, recipient, scheduleRevision: item.scheduleRevision,
+      })))).onConflictDoNothing();
+    }
+    return claimed.length;
+  });
+}
+
 export async function sendDueReminders(now: Date = new Date()): Promise<number> {
   const in1h = new Date(now.getTime() + HOUR);
   const in24h = new Date(now.getTime() + 24 * HOUR);
+  return await enqueueReminder("reminder_24", now, in1h, in24h) + await enqueueReminder("reminder_1", now, now, in1h);
+}
 
-  const dayBefore = await db
-    .update(interviews)
-    .set({ reminder24SentAt: now })
-    .where(
-      and(
-        eq(interviews.status, "scheduled"),
-        isNull(interviews.reminder24SentAt),
-        gt(interviews.startsAt, in1h),
-        lte(interviews.startsAt, in24h),
-      ),
+type ClaimedDelivery = { id: string; interviewId: string; kind: "reminder_24" | "reminder_1" | "feedback_request"; recipient: "recruiter" | "panelist" | "candidate"; attempts: number };
+
+async function claimDeliveries(now: Date, limit: number): Promise<ClaimedDelivery[]> {
+  const stale = new Date(now.getTime() - DELIVERY_LEASE_MS);
+  const result = await db.execute<ClaimedDelivery>(sql`
+    with due as (
+      select id from interview_deliveries
+      where attempts < ${MAX_DELIVERY_ATTEMPTS} and available_at <= ${now}
+        and (state in ('pending', 'failed') or (state = 'processing' and locked_at < ${stale}))
+      order by available_at, created_at for update skip locked limit ${limit}
     )
-    .returning({ id: interviews.id });
+    update interview_deliveries d
+      set state = 'processing', locked_at = ${now}, attempts = d.attempts + 1, updated_at = ${now}
+      from due where d.id = due.id
+      returning d.id, d.interview_id as "interviewId", d.kind, d.recipient, d.attempts
+  `);
+  return result.rows;
+}
 
-  const lastHour = await db
-    .update(interviews)
-    .set({ reminder1SentAt: now, reminder24SentAt: sql`coalesce(${interviews.reminder24SentAt}, ${now.toISOString()}::timestamptz)` })
-    .where(
-      and(
-        eq(interviews.status, "scheduled"),
-        isNull(interviews.reminder1SentAt),
-        gt(interviews.startsAt, now),
-        lte(interviews.startsAt, in1h),
-      ),
-    )
-    .returning({ id: interviews.id });
+async function deliver(item: ClaimedDelivery) {
+  const ctx = await loadInterview(item.interviewId);
+  if (!ctx || !ctx.panelist) throw new Error("Interview recipient context is unavailable");
+  const d = details(ctx);
+  const target = item.recipient === "recruiter" ? ctx.recruiter : item.recipient === "panelist" ? ctx.panelist : ctx.candidate;
+  const mail = item.kind === "feedback_request" ? feedbackRequestMail(ctx.panelist.name, item.interviewId, d) : reminderMail(target.name, d, ctx.interview.teamsJoinUrl);
+  if (item.recipient !== "candidate") {
+    await db.insert(notifications).values({
+      userId: target.id, title: item.kind === "feedback_request" ? "Please submit feedback" : "Interview reminder",
+      body: `${ctx.candidate.name} - ${ctx.job.title}, round ${ctx.interview.round}`,
+      link: item.kind === "feedback_request" ? `/panelist/interviews/${item.interviewId}/feedback`
+        : item.recipient === "panelist" ? "/panelist/interviews" : `/jobs/${ctx.job.id}/candidates/${ctx.candidate.id}/interviews`,
+      deliveryId: item.id,
+    }).onConflictDoNothing();
+  }
+  await sendMail({ to: target.email, subject: mail.subject, html: mail.html });
+}
 
-  for (const { id } of [...dayBefore, ...lastHour]) {
+export async function processInterviewDeliveries(now: Date = new Date(), limit = 50) {
+  const claimed = await claimDeliveries(now, limit);
+  let sent = 0;
+  let failed = 0;
+  for (const item of claimed) {
     try {
-      await sendReminder(id);
+      await deliver(item);
+      await db.update(interviewDeliveries).set({ state: "sent", sentAt: new Date(), lockedAt: null, lastError: null })
+        .where(and(eq(interviewDeliveries.id, item.id), eq(interviewDeliveries.state, "processing")));
+      sent++;
     } catch (err) {
-      console.error("Reminder failed:", id, err);
+      const delayMinutes = Math.min(60, 2 ** Math.min(item.attempts, 6));
+      await db.update(interviewDeliveries).set({ state: "failed", lockedAt: null, availableAt: new Date(now.getTime() + delayMinutes * 60_000), lastError: err instanceof Error ? err.message.slice(0, 1000) : "Unknown delivery failure" })
+        .where(and(eq(interviewDeliveries.id, item.id), eq(interviewDeliveries.state, "processing")));
+      failed++;
     }
   }
-  return dayBefore.length + lastHour.length;
+  return { claimed: claimed.length, sent, failed };
 }
 
 export async function runDueJobs(now: Date = new Date()) {
+  const expired = await expirePastInterviews(now);
   const completed = await completeEndedInterviews(now);
   const reminders = await sendDueReminders(now);
-  // Teams recordings for interviews that ended recently are saved for Admins and Recruiters.
+  const deliveries = await processInterviewDeliveries(now);
   const recordings = await syncRecordings({ now }).catch((err) => {
     console.error("Recording sync failed:", err);
     return { checked: 0, saved: 0, failed: 1 };
   });
-  return { completed, reminders, recordings };
+  return { expired, completed, reminders, deliveries, recordings };
 }

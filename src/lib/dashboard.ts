@@ -26,6 +26,8 @@ export async function upcomingInterviews(limit: number, panelistId?: string) {
     .where(
       and(
         eq(interviews.status, "scheduled"),
+        eq(interviews.bookingState, "confirmed"),
+        eq(interviews.calendarState, "idle"),
         gt(interviews.endsAt, new Date()),
         panelistId ? eq(interviews.panelistId, panelistId) : undefined,
       ),
@@ -51,7 +53,7 @@ export async function adminDashboard() {
         (select count(*)::int from "user" where coalesce(banned, false) = false and role = 'panelist') as panelists,
         (select count(*)::int from jobs where status = 'open') as open_jobs,
         (select count(*)::int from candidates) as candidates,
-        (select count(*)::int from interviews where status = 'scheduled' and ends_at > now()) as upcoming,
+        (select count(*)::int from interviews where status = 'scheduled' and booking_state = 'confirmed' and ends_at > now()) as upcoming,
         (select count(*)::int from interviews where status = 'pending') as pending`),
     db
       .select({
@@ -107,7 +109,7 @@ export async function recruiterDashboard() {
         (select count(*)::int from jobs where status = 'open') as open_jobs,
         (select count(*)::int from candidates c join jobs j on j.id = c.job_id
            where j.status = 'open' and c.stage in ('uploaded', 'next_round')) as waiting,
-        (select count(*)::int from interviews where status = 'scheduled' and ends_at > now()) as upcoming`),
+        (select count(*)::int from interviews where status = 'scheduled' and booking_state = 'confirmed' and ends_at > now()) as upcoming`),
     needsDecision(6),
     upcomingInterviews(6),
     db

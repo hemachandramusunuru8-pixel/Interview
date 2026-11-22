@@ -44,6 +44,20 @@ function offsetMs(instant: number, tz: string): number {
 
 const LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 
+function wallClock(instant: number, tz: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(new Date(instant));
+  const get = (type: string) => Number(parts.find((part) => part.type === type)!.value);
+  return [get("year"), get("month"), get("day"), get("hour"), get("minute")] as const;
+}
+
 /** Converts a wall-clock time ("2026-12-01T10:30") in `tz` to the real UTC instant. Null if invalid. */
 export function zonedToUtc(local: string, tz: string): Date | null {
   const m = LOCAL_RE.exec(local);
@@ -59,6 +73,14 @@ export function zonedToUtc(local: string, tz: string): Date | null {
   // Second pass settles times near a daylight-saving change.
   const refined = asIfUtc - offsetMs(utc, tz);
   if (refined !== utc) utc = refined;
+
+  const requested = [y, mo, d, h, mi] as const;
+  const sameWallClock = (instant: number) => wallClock(instant, tz).every((value, index) => value === requested[index]);
+  // Spring-forward gaps do not round-trip. Repeated autumn times are ambiguous, so require another time.
+  if (!sameWallClock(utc)) return null;
+  for (const minutes of [-120, -90, -60, -30, 30, 60, 90, 120]) {
+    if (sameWallClock(utc + minutes * 60_000)) return null;
+  }
   return new Date(utc);
 }
 

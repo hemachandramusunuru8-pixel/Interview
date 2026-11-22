@@ -4,14 +4,12 @@ import { InterviewList } from "@/components/InterviewList";
 import { ButtonLink, Card, CardHeader, EmptyState, PageHeader, StatCard } from "@/components/ui";
 import { panelistDashboard } from "@/lib/dashboard";
 import { requireRole } from "@/lib/dal";
-import { completeEndedInterviews } from "@/lib/scheduled-jobs";
 import { formatInZone } from "@/lib/time";
 
 export const metadata = { title: "Dashboard" };
 
 export default async function PanelistHome() {
   const { user } = await requireRole("panelist");
-  await completeEndedInterviews().catch((err) => console.error("completeEndedInterviews failed:", err));
   const d = await panelistDashboard(user.id);
 
   return (

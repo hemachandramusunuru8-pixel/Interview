@@ -18,6 +18,7 @@ vi.mock("@/lib/graph", () => ({
   createInterviewEvent: vi.fn(),
   rescheduleInterviewEvent: vi.fn(),
   cancelInterviewEvent: vi.fn(),
+  getInterviewEvent: vi.fn(),
   sendMail: vi.fn(),
 }));
 vi.mock("@/lib/notify", () => ({

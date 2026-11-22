@@ -1,21 +1,17 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { candidates, feedback, interviews, jobs } from "@/db/schema";
 import { CalendarIcon, ClipboardIcon, ClockIcon, InboxIcon, VideoIcon } from "@/components/icons";
 import { InterviewStatusBadge } from "@/components/status";
 import { Avatar, Badge, ButtonLink, Card, CardHeader, EmptyState, PageHeader, SkillTags, buttonClass } from "@/components/ui";
 import { requireRole } from "@/lib/dal";
-import { completeEndedInterviews } from "@/lib/scheduled-jobs";
 import { formatInZone } from "@/lib/time";
-import { AcceptForm, DeclineForm } from "./forms";
+import { AcceptForm, DeclineForm, RetryBookingForm } from "./forms";
 
 export const metadata = { title: "My interviews" };
 
 export default async function PanelistInterviewsPage() {
   const { user: me } = await requireRole("panelist");
-
-  // Close interviews that have finished, so feedback shows up even if the scheduler has not run yet.
-  await completeEndedInterviews().catch((err) => console.error("completeEndedInterviews failed:", err));
 
   // A panelist only ever sees their own interviews.
   const rows = await db
@@ -26,6 +22,7 @@ export default async function PanelistInterviewsPage() {
       skills: candidates.skills,
       jobTitle: jobs.title,
       feedbackId: feedback.id,
+      bookingRetryable: sql<boolean>`${interviews.bookingState} = 'failed' or (${interviews.bookingState} = 'creating' and ${interviews.updatedAt} < now() - interval '2 minutes')`,
     })
     .from(interviews)
     .innerJoin(candidates, eq(interviews.candidateId, candidates.id))
@@ -101,12 +98,16 @@ export default async function PanelistInterviewsPage() {
                     {person(r)}
                     {when(r)}
                   </div>
-                  {r.i.teamsJoinUrl && (
+                  {r.bookingRetryable ? (
+                    <RetryBookingForm interviewId={r.i.id} />
+                  ) : r.i.bookingState === "creating" ? (
+                    <Badge tone="amber">Creating Teams invite</Badge>
+                  ) : r.i.teamsJoinUrl ? (
                     <a href={r.i.teamsJoinUrl} target="_blank" rel="noreferrer" className={buttonClass("primary", "md")}>
                       <VideoIcon width={16} height={16} />
                       Join Teams meeting
                     </a>
-                  )}
+                  ) : null}
                 </li>
               ))}
             </ul>

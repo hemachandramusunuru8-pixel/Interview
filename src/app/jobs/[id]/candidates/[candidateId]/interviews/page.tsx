@@ -9,8 +9,7 @@ import { Avatar, ButtonLink, Card, CardBody, CardHeader, EmptyState, Notice, Pag
 import { requireAnyRole } from "@/lib/dal";
 import { completedRounds } from "@/lib/interviews";
 import { allowedOutcomes } from "@/lib/outcomes";
-import { completeEndedInterviews } from "@/lib/scheduled-jobs";
-import { recordingsFor, syncRecordings } from "@/lib/recordings";
+import { recordingsFor } from "@/lib/recordings";
 import { formatInZone } from "@/lib/time";
 import { CancelForm, OutcomeForm, RescheduleForm, SchedulePanel } from "./forms";
 
@@ -26,8 +25,6 @@ export default async function CandidateInterviewsPage({
     .object({ id: z.string().uuid(), candidateId: z.string().uuid() })
     .safeParse(await params);
   if (!ids.success) notFound();
-
-  await completeEndedInterviews().catch((err) => console.error("completeEndedInterviews failed:", err));
 
   const [cand] = await db
     .select()
@@ -50,8 +47,6 @@ export default async function CandidateInterviewsPage({
     .where(eq(interviews.candidateId, cand.id));
   const feedbackByInterview = new Map(feedbackRows.map((r) => [r.feedback.interviewId, r.feedback]));
 
-  // Save any new Teams recordings for this candidate's recently ended interviews (checked at most every 5 minutes).
-  await syncRecordings({ candidateId: cand.id }).catch((err) => console.error("syncRecordings failed:", err));
   const recordingsByInterview = new Map<string, Awaited<ReturnType<typeof recordingsFor>>>();
   for (const r of await recordingsFor(list.map((x) => x.i.id))) {
     recordingsByInterview.set(r.interviewId, [...(recordingsByInterview.get(r.interviewId) ?? []), r]);
@@ -162,6 +157,13 @@ export default async function CandidateInterviewsPage({
                         <p className="text-sm text-slate-600">
                           Declined{i.declineReason ? `: “${i.declineReason}”` : ""}. Send it to another panelist or post it to the pipeline.
                         </p>
+                      )}
+
+                      {i.status === "scheduled" && i.bookingState === "creating" && (
+                        <Notice tone="amber">The Teams invite is being created. Calendar changes are temporarily unavailable.</Notice>
+                      )}
+                      {i.status === "scheduled" && i.bookingState === "failed" && (
+                        <Notice tone="amber">The Teams invite needs recovery by the assigned panelist before this interview can continue.</Notice>
                       )}
 
                       {fb ? (

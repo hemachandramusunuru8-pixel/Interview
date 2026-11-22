@@ -1,10 +1,10 @@
 "use server";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/db";
-import { candidates, feedback, interviews, jobs, user } from "@/db/schema";
+import { candidates, feedback, interviewDeliveries, interviews, jobs, user } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
 import { requireAnyRole } from "@/lib/dal";
 import { openSlotMail, outcomeMail, panelistCancelledMail, panelistRescheduledMail, panelistRequestMail, type Details } from "@/lib/emails";
@@ -132,12 +132,33 @@ export async function rescheduleInterviewAction(
   if (interview.status !== "pending" && interview.status !== "scheduled") {
     return { error: `A ${INTERVIEW_STATUS_LABEL[interview.status].toLowerCase()} interview cannot be rescheduled.` };
   }
+  if (interview.status === "scheduled" && interview.bookingState !== "confirmed") {
+    return { error: "Recover the Teams invite before rescheduling this interview." };
+  }
+  if (interview.calendarState !== "idle") return { error: "Another calendar change is already in progress." };
 
+  let reservedVersion: number;
   try {
-    await db
+    const [reserved] = await db
       .update(interviews)
-      .set({ startsAt: slot.data.startsAt, endsAt: slot.data.endsAt, timeZone: slot.data.timeZone })
-      .where(eq(interviews.id, interview.id));
+      .set({
+        startsAt: slot.data.startsAt,
+        endsAt: slot.data.endsAt,
+        timeZone: slot.data.timeZone,
+        calendarState: interview.status === "scheduled" ? "rescheduling" : "idle",
+        version: sql`${interviews.version} + 1`,
+        scheduleRevision: sql`${interviews.scheduleRevision} + 1`,
+        reminder24SentAt: null,
+        reminder1SentAt: null,
+      })
+      .where(and(eq(interviews.id, interview.id), eq(interviews.status, interview.status), eq(interviews.calendarState, "idle"), eq(interviews.version, interview.version)))
+      .returning({ version: interviews.version });
+    if (!reserved) return { error: "This interview changed while you were editing it. Refresh and try again." };
+    reservedVersion = reserved.version;
+    await db.update(interviewDeliveries).set({ state: "cancelled" }).where(and(
+      eq(interviewDeliveries.interviewId, interview.id),
+      inArray(interviewDeliveries.state, ["pending", "failed"]),
+    ));
   } catch (err) {
     if (isOverlap(err)) return { error: OVERLAP_MSG };
     console.error(err);
@@ -152,10 +173,16 @@ export async function rescheduleInterviewAction(
       // Put the old time back so the platform and the calendar agree.
       await db
         .update(interviews)
-        .set({ startsAt: interview.startsAt, endsAt: interview.endsAt, timeZone: interview.timeZone })
-        .where(eq(interviews.id, interview.id));
+        .set({ startsAt: interview.startsAt, endsAt: interview.endsAt, timeZone: interview.timeZone, calendarState: "idle", version: sql`${interviews.version} + 1` })
+        .where(and(eq(interviews.id, interview.id), eq(interviews.calendarState, "rescheduling"), eq(interviews.version, reservedVersion)));
       return { error: "The Teams invite could not be updated, so nothing changed. Try again." };
     }
+    const [finished] = await db
+      .update(interviews)
+      .set({ calendarState: "idle", version: sql`${interviews.version} + 1` })
+      .where(and(eq(interviews.id, interview.id), eq(interviews.calendarState, "rescheduling"), eq(interviews.version, reservedVersion)))
+      .returning({ id: interviews.id });
+    if (!finished) return { error: "The calendar was updated, but the local record changed. Refresh before making another change." };
   }
 
   if (ctx.panelist) {
@@ -197,17 +224,42 @@ export async function cancelInterviewAction(
   if (interview.status !== "pending" && interview.status !== "scheduled") {
     return { error: "This interview is already closed." };
   }
+  if (interview.status === "scheduled" && interview.bookingState === "creating") {
+    return { error: "The Teams invite is still being created. Wait a moment, then try again." };
+  }
+  if (interview.status === "scheduled" && interview.bookingState === "failed" && !interview.graphEventId) {
+    return { error: "Recover the Teams invite before cancelling this interview." };
+  }
+  if (interview.calendarState !== "idle") return { error: "Another calendar change is already in progress." };
+
+  const [reserved] = await db
+    .update(interviews)
+    .set(interview.status === "scheduled"
+      ? { calendarState: "cancelling", version: sql`${interviews.version} + 1` }
+      : { status: "cancelled", version: sql`${interviews.version} + 1` })
+    .where(and(eq(interviews.id, interview.id), eq(interviews.status, interview.status), eq(interviews.calendarState, "idle"), eq(interviews.version, interview.version)))
+    .returning({ version: interviews.version });
+  if (!reserved) return { error: "This interview changed before it could be cancelled. Refresh and try again." };
 
   if (interview.status === "scheduled" && interview.graphEventId) {
     try {
       await cancelInterviewEvent(interview.graphEventId, "This interview was cancelled by the recruiter.");
     } catch (err) {
       console.error(err);
+      await db.update(interviews)
+        .set({ calendarState: "idle", version: sql`${interviews.version} + 1` })
+        .where(and(eq(interviews.id, interview.id), eq(interviews.calendarState, "cancelling"), eq(interviews.version, reserved.version)));
       return { error: "The Teams invite could not be cancelled, so nothing changed. Try again." };
     }
   }
 
-  await db.update(interviews).set({ status: "cancelled" }).where(eq(interviews.id, interview.id));
+  if (interview.status === "scheduled") {
+    const [cancelled] = await db.update(interviews)
+      .set({ status: "cancelled", calendarState: "idle", version: sql`${interviews.version} + 1` })
+      .where(and(eq(interviews.id, interview.id), eq(interviews.status, "scheduled"), eq(interviews.calendarState, "cancelling"), eq(interviews.version, reserved.version)))
+      .returning({ id: interviews.id });
+    if (!cancelled) return { error: "The calendar invite was cancelled, but the local record changed. Refresh the page." };
+  }
   if (ctx.candidate.stage === "interview_scheduled") {
     const done = await completedRounds(interview.candidateId);
     await db

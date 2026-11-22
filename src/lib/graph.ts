@@ -2,6 +2,7 @@
 
 type CachedToken = { value: string; expiresAt: number };
 let cached: CachedToken | null = null;
+const GRAPH_TIMEOUT_MS = 15_000;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -22,6 +23,7 @@ async function getAccessToken(): Promise<string> {
       scope: "https://graph.microsoft.com/.default",
       grant_type: "client_credentials",
     }),
+    signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Graph token request failed (${res.status}): ${await res.text()}`);
@@ -64,6 +66,7 @@ export async function sendMail({ to, subject, html }: MailInput): Promise<void> 
 export type Attendee = { name: string; email: string };
 
 export type EventInput = {
+  transactionId: string;
   subject: string;
   html: string;
   startsAt: Date;
@@ -79,6 +82,7 @@ function utcWallClock(d: Date) {
 
 export function buildEventPayload(input: EventInput) {
   return {
+    transactionId: input.transactionId,
     subject: input.subject,
     body: { contentType: "HTML", content: input.html },
     start: utcWallClock(input.startsAt),
@@ -100,6 +104,7 @@ async function graphRequest(method: string, path: string, body?: unknown) {
     method,
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
   });
   if (!res.ok) {
     throw new Error(`Graph ${method} ${path.split("/")[1] ?? ""} failed (${res.status}): ${await res.text()}`);
@@ -113,8 +118,16 @@ export async function createInterviewEvent(input: EventInput) {
     id: string;
     onlineMeeting?: { joinUrl?: string } | null;
   };
-  if (!event.onlineMeeting?.joinUrl) throw new Error("Graph created the event without a Teams link");
-  return { eventId: event.id, joinUrl: event.onlineMeeting.joinUrl };
+  return { eventId: event.id, joinUrl: event.onlineMeeting?.joinUrl ?? null };
+}
+
+/** Reloads an event created by an earlier attempt, including a Teams link that finished provisioning later. */
+export async function getInterviewEvent(eventId: string) {
+  const event = (await graphRequest("GET", `/events/${encodeURIComponent(eventId)}`)) as {
+    id: string;
+    onlineMeeting?: { joinUrl?: string } | null;
+  };
+  return { eventId: event.id, joinUrl: event.onlineMeeting?.joinUrl ?? null };
 }
 
 /** Moves the event; Outlook sends the attendees an updated invite. */

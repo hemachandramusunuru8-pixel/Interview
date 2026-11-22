@@ -30,6 +30,7 @@ export default async function PipelinePage() {
         eq(interviews.status, "pending"),
         isNull(interviews.panelistId),
         gt(interviews.startsAt, new Date()),
+        eq(jobs.status, "open"),
       ),
     )
     .orderBy(asc(interviews.startsAt));

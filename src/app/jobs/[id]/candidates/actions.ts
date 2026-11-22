@@ -61,19 +61,24 @@ export async function createCandidateAction(
   }
 
   try {
-    const [created] = await db
-      .insert(candidates)
-      .values({ ...parsed.data, jobId: job.id, resumePath: path, resumeFilename: resume.name, createdBy: user.id })
-      .returning({ id: candidates.id });
-    await logActivity({
-      actorId: user.id,
-      action: "candidate.created",
-      entityType: "candidate",
-      entityId: created.id,
-      details: { jobId: job.id, email: parsed.data.email },
+    await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(candidates)
+        .values({ ...parsed.data, jobId: job.id, resumePath: path, resumeFilename: resume.name, createdBy: user.id })
+        .returning({ id: candidates.id });
+      await logActivity(
+        {
+          actorId: user.id,
+          action: "candidate.created",
+          entityType: "candidate",
+          entityId: created.id,
+          details: { jobId: job.id, email: parsed.data.email },
+        },
+        tx,
+      );
     });
   } catch (err) {
-    // Nothing was saved, so do not leave an orphan file behind.
+    // Postgres rolled back both the candidate and its audit entry, so this object is unreferenced.
     await deleteResume(path);
     if (isDuplicateEmail(err)) return { error: "A candidate with this email is already on this job." };
     console.error(err);

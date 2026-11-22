@@ -111,13 +111,15 @@ export const candidates = pgTable(
 
 export const interviewStatus = pgEnum("interview_status", [
   "pending", // direct request sent, waiting for the panelist
-  "scheduled", // accepted; Teams event created
+  "scheduled", // assigned to a panelist; booking_state tracks Teams event creation
   "declined",
   "cancelled",
   "completed",
 ]);
 
 export const interviewMode = pgEnum("interview_mode", ["direct", "pipeline"]);
+export const bookingState = pgEnum("booking_state", ["idle", "creating", "confirmed", "failed"]);
+export const calendarState = pgEnum("calendar_state", ["idle", "rescheduling", "cancelling"]);
 
 // Times are stored in UTC; time_zone is the zone the interview was booked in (for display and the invite).
 export const interviews = pgTable(
@@ -137,6 +139,10 @@ export const interviews = pgTable(
     endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
     timeZone: text("time_zone").notNull(),
     status: interviewStatus("status").notNull().default("pending"),
+    bookingState: bookingState("booking_state").notNull().default("idle"),
+    calendarState: calendarState("calendar_state").notNull().default("idle"),
+    version: integer("version").notNull().default(1),
+    scheduleRevision: integer("schedule_revision").notNull().default(1),
     declineReason: text("decline_reason"),
     teamsJoinUrl: text("teams_join_url"),
     graphEventId: text("graph_event_id"),
@@ -169,6 +175,34 @@ export const interviews = pgTable(
   ],
 );
 
+export const deliveryKind = pgEnum("delivery_kind", ["reminder_24", "reminder_1", "feedback_request"]);
+export const deliveryRecipient = pgEnum("delivery_recipient", ["recruiter", "panelist", "candidate"]);
+export const deliveryState = pgEnum("delivery_state", ["pending", "processing", "sent", "failed", "cancelled"]);
+
+export const interviewDeliveries = pgTable(
+  "interview_deliveries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    interviewId: uuid("interview_id").notNull().references(() => interviews.id, { onDelete: "restrict" }),
+    kind: deliveryKind("kind").notNull(),
+    recipient: deliveryRecipient("recipient").notNull(),
+    scheduleRevision: integer("schedule_revision").notNull(),
+    state: deliveryState("state").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    availableAt: timestamp("available_at", { withTimezone: true }).defaultNow().notNull(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex("interview_deliveries_once_uniq").on(table.interviewId, table.kind, table.recipient, table.scheduleRevision),
+    index("interview_deliveries_due_idx").on(table.state, table.availableAt),
+    index("interview_deliveries_interview_idx").on(table.interviewId),
+  ],
+);
+
 // In-app copies of the emails sent to Recruiters and Panelists.
 export const notifications = pgTable(
   "notifications",
@@ -180,6 +214,7 @@ export const notifications = pgTable(
     title: text("title").notNull(),
     body: text("body").notNull(),
     link: text("link"),
+    deliveryId: uuid("delivery_id").unique().references(() => interviewDeliveries.id, { onDelete: "set null" }),
     readAt: timestamp("read_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
