@@ -43,6 +43,13 @@
       "when": 1795275944969,
       "tag": "0005_add_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795335781203,
+      "tag": "0006_add_recordings",
+      "breakpoints": true
     }
   ]
 }
