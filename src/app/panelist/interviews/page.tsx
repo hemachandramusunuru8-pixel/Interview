@@ -6,7 +6,7 @@ import { InterviewStatusBadge } from "@/components/status";
 import { Avatar, Badge, ButtonLink, Card, CardHeader, EmptyState, PageHeader, SkillTags, buttonClass } from "@/components/ui";
 import { requireRole } from "@/lib/dal";
 import { formatInZone } from "@/lib/time";
-import { AcceptForm, DeclineForm, RetryBookingForm } from "./forms";
+import { AcceptForm, CompleteInterviewForm, DeclineForm, RetryBookingForm } from "./forms";
 
 export const metadata = { title: "My interviews" };
 
@@ -98,16 +98,19 @@ export default async function PanelistInterviewsPage() {
                     {person(r)}
                     {when(r)}
                   </div>
-                  {r.bookingRetryable ? (
-                    <RetryBookingForm interviewId={r.i.id} />
-                  ) : r.i.bookingState === "creating" ? (
-                    <Badge tone="amber">Creating Teams invite</Badge>
-                  ) : r.i.teamsJoinUrl ? (
-                    <a href={r.i.teamsJoinUrl} target="_blank" rel="noreferrer" className={buttonClass("primary", "md")}>
-                      <VideoIcon width={16} height={16} />
-                      Join Teams meeting
-                    </a>
-                  ) : null}
+                  <div className="flex flex-wrap items-start justify-end gap-2">
+                    {r.bookingRetryable ? (
+                      <RetryBookingForm interviewId={r.i.id} />
+                    ) : r.i.bookingState === "creating" ? (
+                      <Badge tone="amber">Creating Teams invite</Badge>
+                    ) : r.i.teamsJoinUrl ? (
+                      <a href={r.i.teamsJoinUrl} target="_blank" rel="noreferrer" className={buttonClass("primary", "md")}>
+                        <VideoIcon width={16} height={16} />
+                        Join Teams meeting
+                      </a>
+                    ) : null}
+                    {r.i.bookingState === "confirmed" && <CompleteInterviewForm interviewId={r.i.id} />}
+                  </div>
                 </li>
               ))}
             </ul>

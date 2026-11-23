@@ -36,8 +36,10 @@ export async function syncRecordings(opts: { candidateId?: string; now?: Date } 
             .where(
               and(
                 isNotNull(interviews.teamsJoinUrl),
-                inArray(interviews.status, ["scheduled", "completed"]),
-                lt(interviews.endsAt, now), // the meeting has ended
+                or(
+                  eq(interviews.status, "completed"), // a Panelist confirmed an early finish
+                  and(eq(interviews.status, "scheduled"), lt(interviews.endsAt, now)),
+                ),
                 gt(interviews.endsAt, windowStart), // ...recently
                 or(isNull(interviews.recordingsCheckedAt), lt(interviews.recordingsCheckedAt, recheckBefore)),
                 opts.candidateId ? eq(interviews.candidateId, opts.candidateId) : undefined,

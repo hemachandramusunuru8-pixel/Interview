@@ -7,6 +7,7 @@ const dbTouched = vi.fn();
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/dal", () => ({
   requireRole: (...a: unknown[]) => requireRoleMock(...a),
   requireAnyRole: (...a: unknown[]) => requireAnyRoleMock(...a),
@@ -26,6 +27,7 @@ vi.mock("@/lib/activity", () => ({ logActivity: vi.fn() }));
 
 import {
   acceptInterviewAction,
+  completeInterviewAction,
   declineInterviewAction,
   retryInterviewBookingAction,
 } from "@/app/panelist/interviews/actions";
@@ -47,6 +49,7 @@ beforeEach(() => {
 describe("panelist actions", () => {
   it.each([
     ["accept", acceptInterviewAction],
+    ["complete", completeInterviewAction],
     ["decline", declineInterviewAction],
     ["retry booking", retryInterviewBookingAction],
   ])("%s requires the panelist role and does nothing else when denied", async (_n, action) => {

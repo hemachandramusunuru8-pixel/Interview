@@ -1,11 +1,13 @@
 import "server-only";
-import { and, eq, gt, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { candidates, interviewDeliveries, interviews, notifications } from "@/db/schema";
+import { interviewDeliveries, interviews, notifications } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
 import { feedbackRequestMail, reminderMail, type Details } from "@/lib/emails";
 import { sendMail } from "@/lib/graph";
+import { ensureMeetingEventSubscriptions, processMeetingNotifications } from "@/lib/graph-meeting-events";
 import { loadInterview, type InterviewContext } from "@/lib/interviews";
+import { completeInterview } from "@/lib/interview-completion";
 import { syncRecordings } from "@/lib/recordings";
 
 const HOUR = 60 * 60 * 1000;
@@ -17,22 +19,22 @@ function details(i: InterviewContext): Details {
 }
 
 export async function completeEndedInterviews(now: Date = new Date()): Promise<number> {
+  const webhookFallbackAt = new Date(now.getTime() - 6 * HOUR);
   const due = await db.select({ id: interviews.id }).from(interviews).where(and(
     eq(interviews.status, "scheduled"), eq(interviews.bookingState, "confirmed"), eq(interviews.calendarState, "idle"),
-    lt(interviews.endsAt, now), isNull(interviews.feedbackRequestedAt),
+    or(
+      and(isNull(interviews.graphCallSubscriptionId), lt(interviews.endsAt, now)),
+      lt(interviews.endsAt, webhookFallbackAt),
+    ),
+    isNull(interviews.feedbackRequestedAt),
   )).limit(100);
   let completed = 0;
   for (const row of due) {
-    const won = await db.transaction(async (tx) => {
-      const [claimed] = await tx.update(interviews)
-        .set({ status: "completed", feedbackRequestedAt: now, version: sql`${interviews.version} + 1` })
-        .where(and(eq(interviews.id, row.id), eq(interviews.status, "scheduled"), eq(interviews.bookingState, "confirmed"), eq(interviews.calendarState, "idle"), isNull(interviews.feedbackRequestedAt)))
-        .returning({ candidateId: interviews.candidateId, scheduleRevision: interviews.scheduleRevision });
-      if (!claimed) return false;
-      await tx.update(candidates).set({ stage: "interview_done" }).where(and(eq(candidates.id, claimed.candidateId), eq(candidates.stage, "interview_scheduled")));
-      await tx.insert(interviewDeliveries).values({ interviewId: row.id, kind: "feedback_request", recipient: "panelist", scheduleRevision: claimed.scheduleRevision }).onConflictDoNothing();
-      await logActivity({ actorId: null, action: "interview.completed", entityType: "interview", entityId: row.id }, tx);
-      return true;
+    const won = await completeInterview({
+      interviewId: row.id,
+      actorId: null,
+      completedAt: now,
+      enqueueFeedbackRequest: true,
     });
     if (won) completed++;
   }
@@ -143,6 +145,14 @@ export async function processInterviewDeliveries(now: Date = new Date(), limit =
 
 export async function runDueJobs(now: Date = new Date()) {
   const expired = await expirePastInterviews(now);
+  const meetingSubscriptions = await ensureMeetingEventSubscriptions(now).catch((err) => {
+    console.error("Meeting-call subscription maintenance failed:", err);
+    return { due: 0, active: 0, failed: 1 };
+  });
+  const meetingNotifications = await processMeetingNotifications(now).catch((err) => {
+    console.error("Meeting-call notification processing failed:", err);
+    return { claimed: 0, processed: 0, failed: 1 };
+  });
   const completed = await completeEndedInterviews(now);
   const reminders = await sendDueReminders(now);
   const deliveries = await processInterviewDeliveries(now);
@@ -150,5 +160,5 @@ export async function runDueJobs(now: Date = new Date()) {
     console.error("Recording sync failed:", err);
     return { checked: 0, saved: 0, failed: 1 };
   });
-  return { expired, completed, reminders, deliveries, recordings };
+  return { expired, meetingSubscriptions, meetingNotifications, completed, reminders, deliveries, recordings };
 }

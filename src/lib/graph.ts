@@ -4,6 +4,16 @@ type CachedToken = { value: string; expiresAt: number };
 let cached: CachedToken | null = null;
 const GRAPH_TIMEOUT_MS = 15_000;
 
+export class GraphRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "GraphRequestError";
+  }
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`${name} is not set`);
@@ -110,6 +120,59 @@ async function graphRequest(method: string, path: string, body?: unknown) {
     throw new Error(`Graph ${method} ${path.split("/")[1] ?? ""} failed (${res.status}): ${await res.text()}`);
   }
   return res.status === 204 || res.status === 202 ? null : res.json();
+}
+
+async function graphGlobalRequest(method: string, path: string, body?: unknown) {
+  const token = await getAccessToken();
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    throw new GraphRequestError(`Graph ${method} subscription failed (${res.status}): ${await res.text()}`, res.status);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+export type MeetingCallSubscriptionInput = {
+  joinUrl: string;
+  notificationUrl: string;
+  expirationDateTime: string;
+  clientState: string;
+  encryptionCertificate: string;
+  encryptionCertificateId: string;
+};
+
+export function buildMeetingCallSubscriptionPayload(input: MeetingCallSubscriptionInput) {
+  const encodedJoinUrl = encodeURIComponent(input.joinUrl);
+  return {
+    changeType: "updated",
+    notificationUrl: input.notificationUrl,
+    resource: `communications/onlineMeetings(joinWebUrl='${encodedJoinUrl}')/meetingCallEvents`,
+    expirationDateTime: input.expirationDateTime,
+    clientState: input.clientState,
+    includeResourceData: true,
+    encryptionCertificate: input.encryptionCertificate,
+    encryptionCertificateId: input.encryptionCertificateId,
+    latestSupportedTlsVersion: "v1_2",
+  };
+}
+
+/** Creates a rich-notification subscription whose decrypted payload includes callEnded. */
+export async function createMeetingCallSubscription(input: MeetingCallSubscriptionInput) {
+  return (await graphGlobalRequest("POST", "/subscriptions", buildMeetingCallSubscriptionPayload(input))) as {
+    id: string;
+    expirationDateTime: string;
+  };
+}
+
+/** Renews an existing subscription; meeting-call subscriptions live for at most three days. */
+export async function renewGraphSubscription(subscriptionId: string, expirationDateTime: string) {
+  return (await graphGlobalRequest("PATCH", `/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    expirationDateTime,
+  })) as { id: string; expirationDateTime: string };
 }
 
 /** Creates the event and returns the Teams join link and the event id. */

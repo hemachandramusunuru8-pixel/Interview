@@ -153,6 +153,12 @@ export const interviews = pgTable(
     // Teams recordings: the meeting id is looked up once from the join link; checks stop after a while.
     onlineMeetingId: text("online_meeting_id"),
     recordingsCheckedAt: timestamp("recordings_checked_at", { withTimezone: true }),
+    // Rich Graph notifications report the real Teams call end, which may be earlier
+    // or later than the calendar slot. Subscriptions expire after at most three days.
+    graphCallSubscriptionId: text("graph_call_subscription_id"),
+    graphCallSubscriptionExpiresAt: timestamp("graph_call_subscription_expires_at", { withTimezone: true }),
+    graphCallSubscriptionLockedAt: timestamp("graph_call_subscription_locked_at", { withTimezone: true }),
+    actualEndedAt: timestamp("actual_ended_at", { withTimezone: true }),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id, { onDelete: "restrict" }),
@@ -172,6 +178,37 @@ export const interviews = pgTable(
     index("interviews_panelist_idx").on(table.panelistId),
     index("interviews_candidate_idx").on(table.candidateId),
     index("interviews_status_idx").on(table.status),
+    uniqueIndex("interviews_graph_call_subscription_uniq")
+      .on(table.graphCallSubscriptionId)
+      .where(sql`${table.graphCallSubscriptionId} is not null`),
+  ],
+);
+
+export const graphNotificationState = pgEnum("graph_notification_state", ["pending", "processing", "processed", "failed"]);
+
+// Durable inbox for Microsoft Graph rich notifications. The webhook responds quickly,
+// then the cron worker validates the JWT, verifies/decrypts the payload, and acts on it.
+export const graphMeetingNotifications = pgTable(
+  "graph_meeting_notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    subscriptionId: text("subscription_id").notNull(),
+    notificationId: text("notification_id"),
+    payload: jsonb("payload").notNull(),
+    state: graphNotificationState("state").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    availableAt: timestamp("available_at", { withTimezone: true }).defaultNow().notNull(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex("graph_meeting_notifications_once_uniq")
+      .on(table.subscriptionId, table.notificationId)
+      .where(sql`${table.notificationId} is not null`),
+    index("graph_meeting_notifications_due_idx").on(table.state, table.availableAt),
   ],
 );
 
