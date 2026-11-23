@@ -116,7 +116,7 @@ Mutation forms use Server Actions. Their generated identifiers are not a public 
 | Persistence | Drizzle, `pg` pool, Supabase Postgres | Auth/hiring records, notifications, audit |
 | Files | Supabase Storage | Private resume objects |
 | Communication | Microsoft Graph app credentials | Email and service-mailbox Teams events |
-| Background work | External scheduler → cron endpoint | Completion, feedback requests, reminders |
+| Background work | Graph webhook + external scheduler → cron endpoint | Actual call completion, feedback requests, reminders, subscription renewal |
 | Tests | Vitest | Rules, guards, validation, helpers, payloads |
 
 Requests pass through the optimistic cookie-presence proxy to pages/actions, DAL authorization, and data/integration modules. DAL validates sessions, recognizes allowed roles, and rejects banned users. React `cache` memoizes session lookup within a request. Better Auth also has a 60-second signed-cookie session cache, so revocation immediacy must match that policy.
@@ -136,7 +136,8 @@ Database initialization is lazy, allowing builds without database access. Develo
 | `rate_limit` | Shared authentication throttling |
 | `jobs` | Title, department, description, skills, rounds, status, creator |
 | `candidates` | Job, contact/background, resume, stage; unique job/email |
-| `interviews` | Candidate/job, round, mode, panelist, times, status, Graph/Teams IDs, reminder markers |
+| `interviews` | Candidate/job, round, mode, panelist, times, status, Graph/Teams IDs, call subscription/actual end, reminder markers |
+| `graph_meeting_notifications` | Encrypted rich-notification inbox, leases, attempts, processing result |
 | `feedback` | Unique interview, panelist, 1–5 rating, recommendation, comments |
 | `notifications` | Recipient, content/link, read/creation timestamps |
 | `activity_log` | Actor, action, entity, JSON details, timestamp |
@@ -172,6 +173,10 @@ Never commit real values or expose server secrets through public browser variabl
 | `AZURE_CLIENT_ID` | Microsoft application | Required for Graph |
 | `AZURE_CLIENT_SECRET` | Application credential | Required for Graph |
 | `GRAPH_SERVICE_MAILBOX` | Organizer/sender mailbox | Required for Graph |
+| `GRAPH_WEBHOOK_CLIENT_STATE` | Notification shared secret, max 128 bytes | Required for call-ended detection |
+| `GRAPH_WEBHOOK_CERTIFICATE` | Base64 DER public certificate | Required for rich notifications |
+| `GRAPH_WEBHOOK_CERTIFICATE_ID` | Certificate identifier | Required for rich notifications |
+| `GRAPH_WEBHOOK_PRIVATE_KEY` | PKCS#8 PEM decryption key | Required for rich notifications; secret |
 | `CRON_SECRET` | Scheduler credential | Required for scheduled processing |
 
 `NETLIFY`, `VERCEL`, and `AWS_LAMBDA_FUNCTION_NAME` affect pool defaults. `AWS_REGION` appears in health output. App origin falls back to `URL`, then localhost; the tick script uses only `APP_BASE_URL` or localhost, so set `APP_BASE_URL` for remote runs.
@@ -187,7 +192,7 @@ There is no committed `.env.example`. The final `.env*` ignore currently overrid
 3. Provision database and private resume bucket. Review target and migrations before `npm run db:migrate`.
 4. Bootstrap an Admin. `CLAUDE.md` describes Better Auth CLI usage; verify installed CLI help/version and target before bootstrap. Do not keep a reusable default password.
 5. Run `npm run dev`, or build and start for production-mode checks.
-6. Configure Microsoft permissions, tenant consent, mailbox access, and Teams support. Test with designated recipients.
+6. Configure Microsoft permissions, tenant consent, mailbox access, Teams support, and the [call-ended webhook](TEAMS_CALL_ENDED_WEBHOOK.md). Test with designated recipients.
 7. Install an external recurring scheduler; the tick script alone is not one.
 
 | Command | Purpose |
@@ -208,7 +213,7 @@ Read installed Next.js guides in `node_modules/next/dist/docs/` before framework
 
 An external scheduler should call `POST /api/cron/tick` every five minutes with `Authorization: Bearer <CRON_SECRET>`. The endpoint compares the secret in constant time for equal-length inputs. Missing configuration returns 503; invalid authorization returns 401. No recurring scheduler deployment definition was found in this checkout.
 
-The worker expires past pending requests, completes ended scheduled interviews, advances candidates, enqueues feedback requests and 24-hour/1-hour reminders, then processes a bounded delivery batch. Each recipient has an independent durable task with lease recovery, attempt/error tracking, and exponential backoff. Bookings inside the last hour receive only that reminder. Cron responses distinguish enqueue counts from claimed, sent, and failed deliveries.
+The worker expires past pending requests, maintains short-lived Graph subscriptions, validates/decrypts queued call events, completes ended interviews, advances candidates, enqueues feedback requests and 24-hour/1-hour reminders, then processes bounded delivery and recording batches. Each recipient has an independent durable task with lease recovery, attempt/error tracking, and exponential backoff. Bookings inside the last hour receive only that reminder. Cron responses distinguish subscription, notification, enqueue, claimed, sent, and failed counts.
 
 ### Monitoring to add
 

@@ -7,6 +7,7 @@ An internal recruiting application for jobs, candidates, interview scheduling, T
 - [Application audit](docs/APPLICATION_AUDIT.md) — prioritized defects, UI improvements, performance plan, missing workflows, and roadmap.
 - [Product and technical guide](docs/PRODUCT_AND_TECHNICAL_GUIDE.md) — roles, journeys, routes, states, architecture, data model, configuration, setup, and operations.
 - [Validation and release plan](docs/VALIDATION_PLAN.md) — completed checks, integration scenarios, concurrency tests, browser acceptance, and release gates.
+- [Teams call-ended webhook](docs/TEAMS_CALL_ENDED_WEBHOOK.md) — Graph permissions, certificate secrets, deployment, acceptance, and recovery.
 - [Original phase plan](PHASES.md) — original plan; see the audit for implementation gaps.
 
 The 22 November 2026 audit found release-blocking reliability issues. Candidate/resume consistency and recoverable Teams event creation are fixed in code; tests, types, lint, and production build pass. Migration `0006` must be applied through deployment, and the remaining reminder, concurrency, expiry, and workflow findings still need work.

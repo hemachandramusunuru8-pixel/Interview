@@ -2,6 +2,7 @@
 
 import { and, eq, exists, gt, lt, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
 import { interviews, jobs } from "@/db/schema";
@@ -10,10 +11,39 @@ import { BOOKING_STALE_MS, confirmBooking } from "@/lib/booking";
 import { requireRole } from "@/lib/dal";
 import { recruiterDeclinedMail, type Details } from "@/lib/emails";
 import { loadInterview } from "@/lib/interviews";
+import { completeInterview } from "@/lib/interview-completion";
 import { notifyUser } from "@/lib/notify";
 import { declineSchema } from "@/lib/validation/interview";
 
 export type PanelistActionState = { error?: string; ok?: string };
+
+export async function completeInterviewAction(
+  _prev: PanelistActionState,
+  formData: FormData,
+): Promise<PanelistActionState> {
+  const { user: me } = await requireRole("panelist");
+  const id = z.string().uuid().safeParse(formData.get("interviewId"));
+  if (!id.success) return { error: "Invalid interview." };
+
+  const completed = await completeInterview({
+    interviewId: id.data,
+    actorId: me.id,
+    panelistId: me.id,
+  });
+
+  if (!completed) {
+    const [mine] = await db
+      .select({ status: interviews.status })
+      .from(interviews)
+      .where(and(eq(interviews.id, id.data), eq(interviews.panelistId, me.id)));
+    if (!mine || mine.status !== "completed") {
+      return { error: "Only your confirmed interview can be completed." };
+    }
+  }
+
+  revalidatePath("/panelist/interviews");
+  redirect(`/panelist/interviews/${id.data}/feedback`);
+}
 
 export async function acceptInterviewAction(
   _prev: PanelistActionState,

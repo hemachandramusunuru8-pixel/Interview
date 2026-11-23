@@ -5,6 +5,7 @@ import { candidates, interviews } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
 import { eventBodyHtml, eventSubject, recruiterAcceptedMail, type Details } from "@/lib/emails";
 import { createInterviewEvent, getInterviewEvent } from "@/lib/graph";
+import { ensureMeetingEventSubscription } from "@/lib/graph-meeting-events";
 import { loadInterview } from "@/lib/interviews";
 import { notifyUser } from "@/lib/notify";
 
@@ -113,6 +114,13 @@ export async function confirmBooking(interviewId: string, actorId: string, actio
         ),
       );
     return { ok: false, error: "The Teams event exists, but the booking could not be finalized. Retry it from My interviews." };
+  }
+
+  try {
+    await ensureMeetingEventSubscription(interviewId);
+  } catch (err) {
+    // The booking is valid. The cron worker will retry subscription setup/renewal.
+    console.error("Teams call-ended subscription setup failed:", interviewId, err);
   }
 
   const mail = recruiterAcceptedMail(ctx.recruiter.name, ctx.panelist.name, d);
