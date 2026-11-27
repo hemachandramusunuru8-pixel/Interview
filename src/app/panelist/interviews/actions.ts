@@ -17,6 +17,14 @@ import { declineSchema } from "@/lib/validation/interview";
 
 export type PanelistActionState = { error?: string; ok?: string };
 
+export async function readMeetingStatus(interviewId: string) {
+  const { user } = await requireRole("panelist");
+  if (!z.string().uuid().safeParse(interviewId).success) return null;
+  const [row] = await db.select({ status: interviews.status }).from(interviews)
+    .where(and(eq(interviews.id, interviewId), eq(interviews.panelistId, user.id)));
+  return row?.status ?? null;
+}
+
 export async function completeInterviewAction(
   _prev: PanelistActionState,
   formData: FormData,
@@ -42,6 +50,7 @@ export async function completeInterviewAction(
   }
 
   revalidatePath("/panelist/interviews");
+  if (formData.get("returnToList") === "yes") redirect("/panelist/interviews#feedback-due");
   redirect(`/panelist/interviews/${id.data}/feedback`);
 }
 

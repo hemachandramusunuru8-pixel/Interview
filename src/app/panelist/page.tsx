@@ -51,7 +51,7 @@ export default async function PanelistHome() {
 
         <Card>
           <CardHeader title="Your upcoming interviews" />
-          <InterviewList items={d.next} emptyText="Nothing scheduled yet." />
+          <InterviewList panelist items={d.next} emptyText="Nothing scheduled yet." />
         </Card>
       </div>
     </>

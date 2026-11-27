@@ -1,9 +1,10 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { candidates, feedback, interviews, jobs } from "@/db/schema";
-import { CalendarIcon, ClipboardIcon, ClockIcon, InboxIcon, VideoIcon } from "@/components/icons";
+import { CalendarIcon, ClipboardIcon, ClockIcon, InboxIcon } from "@/components/icons";
+import { PanelistMeeting } from "@/components/PanelistMeeting";
 import { InterviewStatusBadge } from "@/components/status";
-import { Avatar, Badge, ButtonLink, Card, CardHeader, EmptyState, PageHeader, SkillTags, buttonClass } from "@/components/ui";
+import { Avatar, Badge, ButtonLink, Card, CardHeader, EmptyState, PageHeader, SkillTags } from "@/components/ui";
 import { requireRole } from "@/lib/dal";
 import { formatInZone } from "@/lib/time";
 import { AcceptForm, CompleteInterviewForm, DeclineForm, RetryBookingForm } from "./forms";
@@ -104,12 +105,9 @@ export default async function PanelistInterviewsPage() {
                     ) : r.i.bookingState === "creating" ? (
                       <Badge tone="amber">Creating Teams invite</Badge>
                     ) : r.i.teamsJoinUrl ? (
-                      <a href={r.i.teamsJoinUrl} target="_blank" rel="noreferrer" className={buttonClass("primary", "md")}>
-                        <VideoIcon width={16} height={16} />
-                        Join Teams meeting
-                      </a>
+                      <PanelistMeeting id={r.i.id} url={r.i.teamsJoinUrl} />
                     ) : null}
-                    {r.i.bookingState === "confirmed" && <CompleteInterviewForm interviewId={r.i.id} />}
+                    {r.i.bookingState === "confirmed" && !r.i.teamsJoinUrl && <CompleteInterviewForm interviewId={r.i.id} />}
                   </div>
                 </li>
               ))}
@@ -119,7 +117,7 @@ export default async function PanelistInterviewsPage() {
 
         <Card>
           <CardHeader
-            title={<span className="flex items-center gap-2">Feedback due <Badge tone="purple">{feedbackDue.length}</Badge></span>}
+            title={<span id="feedback-due" className="flex items-center gap-2">Feedback due <Badge tone="purple">{feedbackDue.length}</Badge></span>}
             description="The interview has ended. The recruiter is waiting for your view."
           />
           {feedbackDue.length === 0 ? (

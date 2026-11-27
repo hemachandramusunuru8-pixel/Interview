@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PanelistMeeting } from "@/components/PanelistMeeting";
 import { CalendarIcon, VideoIcon } from "@/components/icons";
 import { EmptyState, buttonClass } from "@/components/ui";
 
@@ -30,7 +31,7 @@ function time(date: Date, tz: string) {
 }
 
 /** Compact list of interviews with a date tile and a Teams button. */
-export function InterviewList({ items, emptyText = "Nothing scheduled." }: { items: Item[]; emptyText?: string }) {
+export function InterviewList({ items, emptyText = "Nothing scheduled.", panelist = false }: { items: Item[]; emptyText?: string; panelist?: boolean }) {
   if (items.length === 0) {
     return <EmptyState icon={<CalendarIcon width={22} height={22} />} title={emptyText} />;
   }
@@ -51,7 +52,7 @@ export function InterviewList({ items, emptyText = "Nothing scheduled." }: { ite
           <li key={i.id} className="flex items-center gap-3 px-5 py-3">
             <DateTile date={i.startsAt} tz={i.timeZone} />
             {i.href ? <Link href={i.href} className="min-w-0 flex-1 hover:opacity-80">{body}</Link> : body}
-            {i.teamsJoinUrl && (
+            {i.teamsJoinUrl && (panelist ? <PanelistMeeting id={i.id} url={i.teamsJoinUrl} compact /> :
               <a href={i.teamsJoinUrl} target="_blank" rel="noreferrer" className={buttonClass("secondary", "sm")}>
                 <VideoIcon width={16} height={16} />
                 Join
