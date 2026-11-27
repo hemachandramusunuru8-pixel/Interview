@@ -38,14 +38,14 @@ export function RetryBookingForm({ interviewId }: { interviewId: string }) {
   );
 }
 
-export function CompleteInterviewForm({ interviewId }: { interviewId: string }) {
+export function CompleteInterviewForm({ interviewId, returnToList = false }: { interviewId: string; returnToList?: boolean }) {
   const [state, action, pending] = useActionState(completeInterviewAction, initial);
   const [confirming, setConfirming] = useState(false);
 
   if (!confirming) {
     return (
       <Button type="button" variant="secondary" onClick={() => setConfirming(true)}>
-        Complete & give feedback
+        {returnToList ? "Interview finished?" : "Complete & give feedback"}
       </Button>
     );
   }
@@ -54,6 +54,7 @@ export function CompleteInterviewForm({ interviewId }: { interviewId: string }) 
     <form action={action} className="flex max-w-sm flex-col gap-2 rounded-lg bg-amber-50 p-3 ring-1 ring-amber-200">
       <input type="hidden" name="interviewId" value={interviewId} />
       <p className="text-xs text-amber-900">Confirm only after the Teams interview has finished.</p>
+      {returnToList && <input type="hidden" name="returnToList" value="yes" />}
       <FormMessage error={state.error} />
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setConfirming(false)}>Back</Button>
